@@ -13,22 +13,22 @@ from . import agents
 
 
 gym.register(
-    id="Ict-Bot-Straight-v0",
-    entry_point=f"{__name__}.ict_bot_env:MoveStraightEnv",
+    id="Confidence-Bot-v0",
+    entry_point=f"{__name__}.conf_bot_env:ConfidenceBotEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.ict_bot_env_cfg:IctBotEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.conf_bot_env_cfg:ConfidenceBotEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
 
 
 gym.register(
-    id="Ict-Bot-Straight-Play-v0",
-    entry_point=f"{__name__}.ict_bot_env:MoveStraightEnv",
+    id="Confidence-Bot-Play-v0",
+    entry_point=f"{__name__}.conf_bot_env:ConfidenceBotEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.ict_bot_env_cfg:IctBotEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.conf_bot_env_cfg:ConfidenceBotCfg_PLAY",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     }
 )

@@ -23,8 +23,8 @@ INSTALL_REQUIRES = [
 
 # Installation operation
 setup(
-    name="ict_bot",
-    packages=["ict_bot"],
+    name="confidence_bot",
+    packages=["confidence_bot"],
     author=EXTENSION_TOML_DATA["package"]["author"],
     maintainer=EXTENSION_TOML_DATA["package"]["maintainer"],
     url=EXTENSION_TOML_DATA["package"]["repository"],
