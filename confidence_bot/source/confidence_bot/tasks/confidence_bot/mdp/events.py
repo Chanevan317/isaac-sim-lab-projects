@@ -10,16 +10,10 @@ if TYPE_CHECKING:
     from isaaclab.scene import SceneEntityCfg
 
 
-def reset_camera_posture_uniform(
-    env: ManagerBasedRLEnv, 
-    env_ids: torch.Tensor, 
-    sensor_cfg: SceneEntityCfg, 
-    z_range: tuple[float, float], 
-    pitch_range: tuple[float, float]
-):
+def reset_camera_posture_uniform(env: ManagerBasedRLEnv, env_ids: torch.Tensor, z_range: tuple[float, float], pitch_range: tuple[float, float], sensor_name: str = "tiled_camera"):
     """Randomizes the camera's height and tilt (pitch) relative to its parent link."""
     # 1. Extract the sensor object
-    tiled_camera = env.scene[sensor_cfg.name]
+    tiled_camera = env.scene[sensor_name]
     num_resets = len(env_ids)
 
     # 2. Generate random values
@@ -41,27 +35,40 @@ def reset_camera_posture_uniform(
 
     # Multiply the current world orientation by the new random pitch
     # quat_mul handles the vectorized multiplication for all env_ids
-    tiled_camera.data.quat_w[env_ids] = quat_mul(tiled_camera.data.quat_w[env_ids], pitch_quat)
+    tiled_camera.data.quat_w_world[env_ids] = quat_mul(tiled_camera.data.quat_w_world[env_ids], pitch_quat)
 
 
-def update_camera_fov_uniform(
-    env: ManagerBasedRLEnv, 
-    env_ids: torch.Tensor, 
-    sensor_cfg: SceneEntityCfg, 
-    fov_range: tuple[float, float]
-):
-    """Randomizes the Horizontal FOV by modifying the camera's focal length."""
-    tiled_camera = env.scene[sensor_cfg.name]
+def update_camera_fov_uniform(env: ManagerBasedRLEnv, env_ids: torch.Tensor, fov_range: tuple[float, float], sensor_name: str = "tiled_camera"):
+    """Randomizes the Horizontal FOV by constructing new intrinsic matrices."""
+    tiled_camera = env.scene[sensor_name]
     num_resets = len(env_ids)
+    height, width = tiled_camera.image_shape
     
-    # 1. Generate new FOV values (in degrees)
+    # 1. Generate new FOV values (in degrees) and convert to radians
     new_fov_deg = (fov_range[1] - fov_range[0]) * torch.rand(num_resets, device=env.device) + fov_range[0]
+    new_fov_rad = torch.deg2rad(new_fov_deg)
     
-    # 2. Convert FOV to Focal Length (Simplified pinhole model)
-    # Math: focal_length = (aperture / 2) / tan(fov / 2)
-    # In Isaac Lab, we often modify the horizontal_aperture or focal_length directly.
-    new_focal_lengths = 24.0 * (60.0 / new_fov_deg) # Ratio-based adjustment for C270 baseline
+    # 2. Calculate Focal Length in pixels
+    # Formula: f_pixels = (width / 2) / tan(fov_rad / 2)
+    f_pixels = (width / 2.0) / torch.tan(new_fov_rad / 2.0)
     
-    # 3. Apply the change to the sensor intrinsics
-    # This requires the sensor to re-calculate its projection matrix
-    tiled_camera.set_intrinsic_matrices(focal_lengths=new_focal_lengths, env_ids=env_ids)
+    # 3. Construct the Intrinsic Matrices (K) [N, 3, 3]
+    # K = [[fx,  0, cx],
+    #      [ 0, fy, cy],
+    #      [ 0,  0,  1]]
+    K = torch.zeros((num_resets, 3, 3), device=env.device)
+    
+    # Set focal lengths (assuming square pixels, so fx = fy)
+    K[:, 0, 0] = f_pixels
+    K[:, 1, 1] = f_pixels
+    
+    # Set principal point (center of the image)
+    K[:, 0, 2] = width / 2.0
+    K[:, 1, 2] = height / 2.0
+    
+    # Homogeneous coordinate
+    K[:, 2, 2] = 1.0
+    
+    # 4. Apply the change
+    # Note: We pass the K matrices. The function will update the USD apertures automatically.
+    tiled_camera.set_intrinsic_matrices(matrices=K, env_ids=env_ids)

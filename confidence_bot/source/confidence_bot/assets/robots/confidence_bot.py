@@ -9,7 +9,6 @@ import os
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
-from isaaclab.sensors import TiledCameraCfg, ImuCfg
 
 # Path to the directory containing this Python script
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,37 +56,6 @@ CONFIDENCE_BOT_CFG = ArticulationCfg(
             velocity_limit_sim=5.0,
             stiffness=0.0,
             damping=10000.0,
-        ),
-    },
-
-    sensors={
-        "tiled_camera": TiledCameraCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/confidence_bot/body", # Path inside your USD
-            update_period=0.016, # 60 FPS (1/60 = 0.016s)
-            height=480,
-            width=640,
-            data_types=["rgb", "distance_to_image_plane"],
-            offset=TiledCameraCfg.OffsetCfg(
-                pos=(0.21, 0.0, 0.75), # X=front of pole, Y=centered, Z=top of pole
-                rot=(0.9239, 0.0, 0.3827, 0.0), # 45 deg down
-                convention="ros", # Uses standard ROS camera axes
-            ),
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=24.0, # Adjust to match your 60° FOV
-                focus_distance=400.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.1, 100.0),
-            ),
-        ),
-
-        "imu": ImuCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/confidence_bot/base", # Attach to the main chassis
-            update_period=0.01, # 100Hz (matches typical real-world IMU rates)
-            offset=ImuCfg.OffsetCfg(
-                pos=(0.0, 0.0, 0.0), 
-                rot=(1.0, 0.0, 0.0, 0.0)
-            ),
-            gravity_bias=(0.0, 0.0, 9.81),
         ),
     },
 )

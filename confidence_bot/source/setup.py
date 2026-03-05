@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Installation script for the 'ict_bot_straight' python package."""
+"""Installation script for the 'confidence bot' python package."""
 
 import os
 import toml

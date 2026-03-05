@@ -20,4 +20,4 @@ import os
 EXTENSION_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 
 # Optional: Define a specific path for assets to make configs cleaner
-ICT_BOT_ASSETS_DIR = os.path.join(EXTENSION_DIR, "assets")
+CONFIDENCE_BOT_ASSETS_DIR = os.path.join(EXTENSION_DIR, "assets")

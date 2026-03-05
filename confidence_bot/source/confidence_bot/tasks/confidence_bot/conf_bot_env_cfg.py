@@ -20,13 +20,13 @@ class ConfidenceBotEnvCfg(ConfidenceBotEnvCfg):
         super().__post_init__()
 
     # Action/Observation/State spaces
-    action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 13  #
+    action_space = 1   
+    observation_space = 20  
     state_space = 0
     
     # Physical properties
-    wheel_radius = 0.1
-    wheel_spacing = 0.51
+    wheel_radius = 0.05
+    wheel_spacing = 0.31
     max_linear_velocity = 2.0
     max_angular_velocity = 8.0
     
@@ -35,7 +35,7 @@ class ConfidenceBotEnvCfg(ConfidenceBotEnvCfg):
         "left_front_wheel_joint",
         "left_back_wheel_joint",
         "right_front_wheel_joint",
-        "right_backfront_wheel_joint",
+        "right_back_wheel_joint",
     ]
 
 

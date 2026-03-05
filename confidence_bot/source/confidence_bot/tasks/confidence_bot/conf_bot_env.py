@@ -16,10 +16,12 @@ import isaaclab.sim as sim_utils
 
 # import mdp
 import confidence_bot.tasks.confidence_bot.mdp as mdp
-from isaaclab.envs.mdp import JointVelocityActionCfg
+from isaaclab.utils.noise import GaussianNoiseCfg
+from isaaclab.sensors import TiledCameraCfg, ImuCfg
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ActionTermCfg as ActTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -55,21 +57,60 @@ class ConfidenceBotSceneCfg(InteractiveSceneCfg):
     # april tag
     april_tag = APRILTAG_CFG.replace(prim_path="{ENV_REGEX_NS}/AprilTag")
 
+    tiled_camera = TiledCameraCfg(
+        # Notice the path: it points to a specific link INSIDE the robot's prim_path
+        prim_path="{ENV_REGEX_NS}/Robot/confidence_bot/body/camera", 
+        update_period=0.016, 
+        height=480,
+        width=640,
+        data_types=["rgb", "distance_to_image_plane"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0, 
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 100.0),
+        ),
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(0.21, 0.0, 0.75), 
+            rot=(0.5, 0.5, -0.5, -0.5), # Ensure this matches your desired tilt
+            convention="ros",
+        ),
+    )
+
+    imu = ImuCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/confidence_bot/base", 
+        update_period=0.01,
+        gravity_bias=(0.0, 0.0, 9.81),
+    )
+
 
 
 ##
 # MDP settings
 ##
 
+@configclass
+class CommandsCfg:
+    """Command specifications for the environment."""
+
+    base_velocity = mdp.UniformVelocityCommandCfg(
+        asset_name="robot",
+        resampling_time_range=(1.0e9, 1.0e9),  # Only resample on RESET
+        ranges=mdp.UniformVelocityCommandCfg.Ranges(
+            lin_vel_x=(0.2, 0.6), # Random speed between 0.2 and 0.6 m/s
+            lin_vel_y=(0.0, 0.0), # No sideways strafing
+            ang_vel_z=(0.0, 0.0), # The AI will decide the steering, not the command
+        ),
+    )
+
 
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    wheel_action: JointVelocityActionCfg = JointVelocityActionCfg(
+    wheel_vel = mdp.JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["left_.*_wheel_joint", "right_.*_wheel_joint"],
-        scale=5.0,
+        scale=1.0,
     )
 
 
@@ -81,7 +122,32 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        
+        imu_data = ObsTerm(
+            func=mdp.get_imu_data, 
+            params={"sensor_name": "imu"},
+            noise=GaussianNoiseCfg(std=0.05), # Simulate motor vibration jitter
+            scale=0.1,
+        )
+
+        tag_coords = ObsTerm(
+            func=mdp.get_tag_pixel_coords,
+            history_length=3,              # AI sees current + 2 past frames
+            params={
+                "sensor_name": "tiled_camera",
+                "tag_cfg": SceneEntityCfg("april_tag"),
+            },
+            noise=GaussianNoiseCfg(std=0.02), # Simulate detection jitter
+            clip=(-1.0, 1.0),
+        )
+
+        target_speed = ObsTerm(
+            func=mdp.get_target_speed
+        )
+
+        last_action = ObsTerm(
+            func=mdp.last_action,
+            scale=1.0,
+        )
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -95,7 +161,57 @@ class ObservationsCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    
+    # 1. THE CARROT: Stay centered on the Tag
+    # We use a Gaussian-style reward so the 'pay' is highest at u=0
+    track_tag_u = RewTerm(
+        func=mdp.track_tag_center_u,
+        weight=1.0,
+        params={
+            "std": 0.2,
+            "tag_cfg": SceneEntityCfg("april_tag")
+        },
+    )
+
+    # 2. PROGRESS: Keep moving forward
+    # Reward the robot for having a positive velocity in the command direction
+    forward_velocity = RewTerm(
+        func=mdp.forward_velocity_tracking,
+        weight=1.5,
+        params={
+            "robot_cfg": SceneEntityCfg("robot"),
+            "command_name": "base_velocity"
+        },
+    )
+
+    # 3. STABILITY: Don't let the 1m pole wobble
+    # Punish high lateral acceleration (y-axis) from the IMU
+    penalize_pole_sway = RewTerm(
+        func=mdp.log_penalty,
+        weight=-0.1, # Negative weight makes it a penalty
+        params={
+            "sensor_cfg": SceneEntityCfg("imu"),
+            "index": 1, # e.g., Penalizing Y-axis acceleration (side-to-side shaking)
+        },
+    )
+
+    # 4. SMOOTHNESS: Punish rapid discrete steering changes
+    # This prevents the -1 -> 1 -> -1 jitter (Bang-Bang control)
+    action_rate = RewTerm(
+        func=mdp.action_rate_l2,
+        weight=-0.05,
+    )
+
+    # 5. SUCCESS: Big bonus for reaching the "Disappearing Point"
+    # When v (vertical) is close to -1 and tag is centered
+    reach_tag_bonus = RewTerm(
+        func=mdp.reach_tag_success,
+        weight=50.0,
+        params={
+            "tag_cfg": SceneEntityCfg("april_tag"),
+            "threshold_v": 0.85,
+            "threshold_u": 0.15
+        },
+    )
 
 
 @configclass
@@ -129,6 +245,7 @@ class MyEventCfg:
                 "y": (-1.0, 1.0), 
                 "z": (0.01, 0.01)
             },
+            "velocity_range": {},
         },
     )
 
@@ -138,11 +255,9 @@ class MyEventCfg:
         func=mdp.reset_camera_posture_uniform,
         mode="reset",
         params={
-            "sensor_cfg": SceneEntityCfg("robot", sensor_names=["tiled_camera"]),
-            "pose_range": {
-                "z_range": (0.375, 0.75),        # Half-pole to Full-pole height
-                "pitch_range": (-0.17, 0.17),  # +/- 10 degrees in radians
-            },
+            "sensor_name": "tiled_camera",
+            "z_range": (0.375, 0.45),        
+            "pitch_range": (-0.17, 0.17),  # +/- 10 degrees in radians
         },
     )
 
@@ -152,7 +267,7 @@ class MyEventCfg:
         func=mdp.update_camera_fov_uniform,
         mode="reset",
         params={
-            "sensor_cfg": SceneEntityCfg("robot", sensor_names=["tiled_camera"]),
+            "sensor_name": "tiled_camera",
             "fov_range": (50.0, 70.0), # 60 +/- 10 degrees
         },
     )
@@ -163,7 +278,16 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    out_of_bounds = DoneTerm(func=mdp.out_of_bounds)
+    
+    reached_target = DoneTerm(
+        func=mdp.reached_tag_visual, 
+        params={
+            "tag_cfg": SceneEntityCfg("april_tag"),
+            "threshold_v": -0.85, 
+            "threshold_u": 0.15,
+            "sensor_name": "tiled_camera",
+        }
+    )
 
 
 ##
@@ -176,19 +300,22 @@ class ConfidenceBotEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for confidence bot."""
 
     # Scene settings
-    scene: ConfidenceBotSceneCfg = ConfidenceBotSceneCfg(num_envs=4096, env_spacing=2.5)
+    scene: ConfidenceBotSceneCfg = ConfidenceBotSceneCfg(num_envs=4096, env_spacing=7)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
+    commands: CommandsCfg = CommandsCfg()
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     events: MyEventCfg = MyEventCfg()
     terminations: TerminationsCfg = TerminationsCfg()
 
+    wheel_dof_name: str = ".*_wheel_joint"
+
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 4
+        self.decimation = 6
         self.sim.render_interval = self.decimation
         self.episode_length_s = 30
         self.sim.dt = 1.0 / 60.0

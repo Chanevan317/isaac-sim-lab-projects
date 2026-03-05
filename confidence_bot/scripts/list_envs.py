@@ -27,11 +27,11 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 from prettytable import PrettyTable
 
-import ict_bot.tasks  # noqa: F401
+import confidence_bot.tasks  # noqa: F401
 
 
 def main():
-    """Print all environments registered in `ict_bot` extension."""
+    """Print all environments registered in `confidence_bot` extension."""
     # print all the available environments
     table = PrettyTable(["S. No.", "Task Name", "Entry Point", "Config"])
     table.title = "Available Environments in ICT Bot Project"
@@ -44,7 +44,7 @@ def main():
     index = 0
     # acquire all Isaac environments names
     for task_spec in gym.registry.values():
-        if "Ict-Bot-" in task_spec.id:
+        if "Confidence-Bot-" in task_spec.id:
             # add details to table
             table.add_row([index + 1, task_spec.id, task_spec.entry_point, task_spec.kwargs["env_cfg_entry_point"]])
             # increment count

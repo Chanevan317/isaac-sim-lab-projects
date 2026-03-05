@@ -109,7 +109,7 @@ from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_che
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 
-import ict_bot.tasks  # noqa: F401
+import confidence_bot.tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 

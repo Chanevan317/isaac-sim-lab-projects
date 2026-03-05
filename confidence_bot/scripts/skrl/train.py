@@ -108,7 +108,7 @@ from isaaclab.utils.io import dump_yaml
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 
-import ict_bot.tasks  # noqa: F401
+import confidence_bot.tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 
