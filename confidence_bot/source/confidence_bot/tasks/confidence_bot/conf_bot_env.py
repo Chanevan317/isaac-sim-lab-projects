@@ -283,7 +283,7 @@ class TerminationsCfg:
         func=mdp.reached_tag_visual, 
         params={
             "tag_cfg": SceneEntityCfg("april_tag"),
-            "threshold_v": -0.85, 
+            "threshold_v": 0.85, 
             "threshold_u": 0.15,
             "sensor_name": "tiled_camera",
         }
@@ -300,7 +300,7 @@ class ConfidenceBotEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for confidence bot."""
 
     # Scene settings
-    scene: ConfidenceBotSceneCfg = ConfidenceBotSceneCfg(num_envs=4096, env_spacing=7)
+    scene: ConfidenceBotSceneCfg = ConfidenceBotSceneCfg(num_envs=32, env_spacing=10)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

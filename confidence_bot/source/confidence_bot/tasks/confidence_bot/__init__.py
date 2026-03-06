@@ -28,7 +28,7 @@ gym.register(
     entry_point=f"{__name__}.conf_bot_env:ConfidenceBotEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.conf_bot_env_cfg:ConfidenceBotCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.conf_bot_env_cfg:ConfidenceBotEnvCfg_PLAY",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     }
 )

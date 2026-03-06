@@ -39,8 +39,10 @@ def get_tag_pixel_coords(env: ManagerBasedRLEnv, tag_cfg: SceneEntityCfg, sensor
     z = tag_pos_cam[:, 2:3].clamp(min=1e-6)
     
     # Standard perspective projection
-    u = (K[:, 0, 0] * tag_pos_cam[:, 0:1] / z) + K[:, 0, 2]
-    v = (K[:, 1, 1] * tag_pos_cam[:, 1:2] / z) + K[:, 1, 2]
+    # u = (K[:, 0, 0] * tag_pos_cam[:, 0:1] / z) + K[:, 0, 2]
+    # v = (K[:, 1, 1] * tag_pos_cam[:, 1:2] / z) + K[:, 1, 2]
+    u = (K[:, 0, 0].unsqueeze(-1) * tag_pos_cam[:, 0:1] / z) + K[:, 0, 2].unsqueeze(-1)
+    v = (K[:, 1, 1].unsqueeze(-1) * tag_pos_cam[:, 1:2] / z) + K[:, 1, 2].unsqueeze(-1)
     
     # 5. Normalize to [-1, 1] range for RL
     # (Optional: helpful for neural networks to have normalized inputs)
