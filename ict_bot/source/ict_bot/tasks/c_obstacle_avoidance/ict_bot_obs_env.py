@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from ict_bot.assets.markers.target_cone import TARGET_CONE_CFG
 from ict_bot.tasks.b_reach_target.ict_bot_target_env import ReachTargetSceneCfg
-from ict_bot.tasks.b_reach_target.ict_bot_target_env import ActionsCfg as ReachTargetActionsCfg
+from ict_bot.tasks.a_move_straight.ict_bot_env import ActionsCfg as MoveStraightActionsCfg
 from ict_bot.tasks.b_reach_target.ict_bot_target_env import MyEventCfg as ReachTargetEventCfg
 from ict_bot.tasks.b_reach_target.ict_bot_target_env import TerminationsCfg as ReachTargetTerminationsCfg
 from isaaclab.sensors import MultiMeshRayCasterCfg, patterns, ContactSensorCfg
@@ -73,7 +73,7 @@ class ObstacleAvoidanceSceneCfg(ReachTargetSceneCfg):
             horizontal_fov_range=(0.0, 360.0), 
             horizontal_res=1.2 
         ),
-        max_distance=3.0,
+        max_distance=4.0,
         debug_vis=True,
     )
 
@@ -93,7 +93,7 @@ class ObstacleAvoidanceSceneCfg(ReachTargetSceneCfg):
 
 
 @configclass
-class ActionsCfg(ReachTargetActionsCfg):
+class ActionsCfg(MoveStraightActionsCfg):
     """Action specifications for the MDP."""
 
 

@@ -19,8 +19,9 @@ from ict_bot import ICT_BOT_ASSETS_DIR
 
 
 # import mdp
-from ict_bot.tasks.c_obstacle_avoidance.mdp.observations import lidar_distances
-import ict_bot.tasks.d_square_track.mdp as mdp
+from ict_bot.tasks.c_obstacle_avoidance.mdp.observations import lidar_distances, target_reached
+from ict_bot.tasks.c_obstacle_avoidance.mdp.rewards import penalty_anti_reverse
+import ict_bot.tasks.e_corridor.mdp as mdp
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -36,7 +37,7 @@ from isaaclab.utils import configclass
 
 
 @configclass
-class SquareTrackEnvSceneCfg(ObstacleAvoidanceSceneCfg):
+class CorridorEnvSceneCfg(ObstacleAvoidanceSceneCfg):
     """Configuration for the scene."""
 
     def __post_init__(self):
@@ -45,7 +46,7 @@ class SquareTrackEnvSceneCfg(ObstacleAvoidanceSceneCfg):
         if self.scene is not None:
             self.scene = self.scene.replace(
                 spawn=self.scene.spawn.replace(
-                    usd_path=os.path.join(ICT_BOT_ASSETS_DIR, "scenes", "square_track.usd")
+                    usd_path=os.path.join(ICT_BOT_ASSETS_DIR, "scenes", "corridor.usd")
                 )
             )
 
@@ -80,7 +81,6 @@ class ObservationsCfg:
             func=lidar_distances, 
             params={"sensor_cfg": SceneEntityCfg("raycaster"), "max_distance": 4.0}
         )
-        
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -104,9 +104,15 @@ class RewardsCfg:
         }
     )
 
+    reached = RewTerm(
+        func=target_reached,
+        weight=5000.0,
+        params={"robot_cfg": SceneEntityCfg("robot")}
+    )
+
     # --- NEGATIVE CONSTRAINTS ---
     no_reverse = RewTerm(
-        func=mdp.penalty_anti_reverse, 
+        func=penalty_anti_reverse, 
         weight=-1000.0, 
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
@@ -142,11 +148,11 @@ class TerminationsCfg(ObstacleAvoidanceTerminationsCfg):
 
 
 @configclass
-class SquareTrackEnvCfg(ManagerBasedRLEnvCfg):
+class CorridorEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for ict bot to move straight."""
 
     # Scene settings
-    scene: SquareTrackEnvSceneCfg = SquareTrackEnvSceneCfg(num_envs=4096, env_spacing=10.0)
+    scene: CorridorEnvSceneCfg = CorridorEnvSceneCfg(num_envs=4096, env_spacing=10.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -160,7 +166,7 @@ class SquareTrackEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 4
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 20.0
+        self.episode_length_s = 30.0
         # simulation settings
         self.sim.dt = 1.0 / 60.0
 
@@ -170,12 +176,12 @@ class SquareTrackEnvCfg(ManagerBasedRLEnvCfg):
 ##
 
 
-class SquareTrackEnv(ManagerBasedRLEnv):
+class CorridorEnv(ManagerBasedRLEnv):
     """Environment for ICT Bot moving straight."""
     
-    cfg: SquareTrackEnvCfg
+    cfg: CorridorEnvCfg
     
-    def __init__(self, cfg: SquareTrackEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: CorridorEnvCfg, render_mode: str | None = None, **kwargs):
 
         super().__init__(cfg, render_mode, **kwargs)
         
