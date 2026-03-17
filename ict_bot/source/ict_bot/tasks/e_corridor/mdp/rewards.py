@@ -5,69 +5,90 @@ from typing import TYPE_CHECKING
 import torch
 from ict_bot.tasks.e_corridor.mdp.observations import rel_target_pos, heading_error, lidar_distances, imu_observations
 from isaaclab.utils.math import quat_inv, quat_apply
+from isaaclab.envs.mdp import action_rate_l2, joint_vel_l2
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from isaaclab.managers import SceneEntityCfg
 
 
-def progress_to_target(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Rewards moving closer to the target using the local relative position."""
-    # Reuse your existing observation function logic
+def reward_gated_progress_exponential(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+    level = getattr(env, "curr_level", 1)
     local_pos = rel_target_pos(env, robot_cfg)
-    
-    # Current distance is just the norm of the relative vector
     current_dist = torch.norm(local_pos, dim=-1)
+    dist_delta = (env.prev_tgt_dist - current_dist) / env.step_dt
     
-    # We want to reward the REDUCTION in distance
-    # Isaac Lab typically tracks previous states for you
-    distance_moved = env.prev_tgt_dist - current_dist
-    return distance_moved / env.step_dt
+    # PHASE 1: Pure distance reduction. No questions asked.
+    if level == 1:
+        return torch.clamp(dist_delta, min=0.0) * 15.0 
 
-    # """Rewards moving closer to the target, scaled by heading alignment."""
-    # local_pos = rel_target_pos(env, robot_cfg)
-    # current_dist = torch.norm(local_pos, dim=-1)
+    # PHASE 2+: Re-introduce gates for precision
+    pow_val = 2.0 if level == 2 else 4.0
+    speed_thresh = 0.05 if level == 2 else 0.2
     
-    # # Calculate raw progress
-    # distance_moved = env.prev_tgt_dist - current_dist
-    # progress = distance_moved / env.step_dt
-    
-    # # --- DYNAMIC GATE ---
-    # # Use your heading_error [sin, cos]. cos is 1.0 at 0 deg, 0.0 at 90 deg.
-    # error_vec = heading_error(env, robot_cfg)
-    # cos_error = error_vec[:, 1]
-    
-    # # Scale progress: Only pay if facing within +/- 90 degrees (cos > 0)
-    # # We use torch.clamp to ensure we don't reward "negative progress" (moving away) 
-    # # while facing the wrong way.
-    # gate = torch.clamp(cos_error, min=0.0)
-    
-    # return progress * gate
-
-
-def align_to_target(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Rewards facing the target (-Y front)."""
-    # Use your heading_error function which returns [sin, cos]
-    # cos(angle) is 1.0 when perfectly aligned
     h_error = heading_error(env, robot_cfg)
-    cos_theta = h_error[:, 1] 
-    return cos_theta
+    alignment_gate = torch.pow(torch.clamp(h_error[:, 1], min=0.0), pow_val)
+    speed_gate = torch.sigmoid(10.0 * (dist_delta - speed_thresh))
+    
+    return torch.clamp(dist_delta, min=0.0) * alignment_gate * speed_gate * 20.0
 
 
-def penalty_anti_reverse(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Penalize moving in the local +Y direction."""
+def forward_velocity_reward(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+    level = getattr(env, "curr_level", 1)
     robot = env.scene[robot_cfg.name]
-    # Local velocity (num_envs, 3)
+    
+    # Local -Y is forward
     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    # If Y > 0, it's moving backward. 
-    return torch.clamp(local_vel[:, 1], min=0.0)
+    forward_speed = -local_vel[:, 1] # Positive = Forward, Negative = Backward
+    
+    # Get alignment (1.0 = perfect, 0.0 = perpendicular, -1.0 = backwards)
+    h_error = heading_error(env, robot_cfg)
+    alignment = h_error[:, 1]
+    
+    if level == 1:
+        # PHASE 1: Simple Carrot & Stick
+        # If moving forward, reward is boosted by alignment. 
+        # If moving backward, it's a flat penalty to kill the habit.
+        reward = torch.where(forward_speed > 0, forward_speed * alignment, forward_speed * 2.0)
+        weight = 15.0
+    elif level == 2:
+        # PHASE 2+: The Alignment Gate
+        # Robot ONLY gets forward reward if alignment > 0.5 (approx 60 degrees)
+        gate = torch.clamp(alignment, min=0.0)
+        reward = forward_speed * torch.pow(gate, 2.0)
+        weight = 10.0 if level == 2 else 5.0
+    else:
+        gate = torch.clamp(alignment, min=0.0)
+        reward = forward_speed * torch.pow(gate, 4.0)
+        weight = 5.0
+    
+    return reward * weight
 
 
-def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float = 0.3):
+def target_reached_reward_phased(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, distance: float = 0.3):
+    level = getattr(env, "curr_level", 1)
+    
+    # Calculate distance (Ignoring Z)
+    robot = env.scene[robot_cfg.name]
+    dist = torch.norm(env.target_pos[:, :2] - robot.data.root_pos_w[:, :2], dim=-1)
+    
+    # 30cm threshold
+    reached = (dist < distance).float()
+
+    # Hardcoded Logic
+    if level == 1: prize = 500.0
+    elif level == 2: prize = 1000.0
+    elif level == 3: prize = 5000.0
+    else: prize = 15000.0 # Level 4
+        
+    return reached * prize
+
+
+def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float = 0.25):
     """Penalizes getting too close to walls based on LIDAR."""
     # Use your normalized lidar_distances [0, 1]
     # 0.0 is a hit, 1.0 is clear (at max_distance=0.5m)
-    lidar_values = lidar_distances(env, sensor_cfg, max_distance=0.5)
+    lidar_values = lidar_distances(env, sensor_cfg, max_distance=1.0)
     
     # Find the closest point in the entire scan
     min_dist, _ = torch.min(lidar_values, dim=-1)
@@ -78,13 +99,59 @@ def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, 
     return penalty
 
 
-def imu_stability_reward(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg):
-    """Penalizes high angular velocity to prevent shaking/wobbling."""
-    imu_data = imu_observations(env, sensor_cfg)
+def imu_stability_phased(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg):
+    level = getattr(env, "curr_level", 1)
     
-    # imu_data[:, 2] is the Yaw Rate (Z-axis angular velocity)
-    # We penalize the absolute value of the yaw rate
+    # Disable for Phase 1 & 2
+    if level <= 2:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    imu_data = imu_observations(env, sensor_cfg)
     yaw_rate = torch.abs(imu_data[:, 2])
     
-    # Small penalty to encourage smooth, straight driving
-    return -0.01 * yaw_rate
+    # Penalize only when level is high
+    weight = -0.025 if level == 3 else -0.5
+    return weight * torch.clamp(yaw_rate - 0.1, min=0.0)
+
+
+def action_rate_l2_phased(env: ManagerBasedRLEnv):
+    level = getattr(env, "curr_level", 1)
+    
+    if level == 1:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # Standard penalty for Level 2+
+    penalty = action_rate_l2(env)
+    
+    # You can also scale it by level here if you want
+    weight = 0.01 if level == 2 else 0.05
+    return penalty * weight
+
+
+def is_alive_phased(env: ManagerBasedRLEnv):
+    level = getattr(env, "curr_level", 1)
+    
+    # Increasing weights directly
+    if level == 1: weight = -0.5
+    elif level == 2: weight = -2.0
+    else: weight = -5.0 # Level 3 & 4
+        
+    return torch.ones(env.num_envs, device=env.device) * weight
+
+
+def joint_vel_penalty_phased(env: ManagerBasedRLEnv):
+    """Penalizes high wheel speeds to prevent slipping, active from Phase 2."""
+    level = getattr(env, "curr_level", 1)
+    
+    # Phase 1: No penalty (let it spin to discover movement)
+    if level == 1:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # Built-in MDP function for L2 norm of joint velocities
+    # This penalizes the square of the wheel speeds
+    raw_penalty = joint_vel_l2(env)
+    
+    # Phase 2: Light penalty | Phase 3-4: Stronger penalty
+    weight = -0.0001 if level == 2 else -0.0005
+    
+    return raw_penalty * weight

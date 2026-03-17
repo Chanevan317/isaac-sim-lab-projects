@@ -21,14 +21,14 @@ ICT_BOT_CFG = ArticulationCfg(
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
-            max_linear_velocity=0.6,
-            max_angular_velocity=3.5,
-            max_depenetration_velocity=1000.0,
+            max_linear_velocity=1.0,
+            max_angular_velocity=4.0,
+            max_depenetration_velocity=10.0,
             enable_gyroscopic_forces=True,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
-            solver_position_iteration_count=8,
+            solver_position_iteration_count=16,
             solver_velocity_iteration_count=4,
             sleep_threshold=0.005,
             stabilization_threshold=0.001,
@@ -44,10 +44,10 @@ ICT_BOT_CFG = ArticulationCfg(
     actuators={
         "wheels": ImplicitActuatorCfg(
             joint_names_expr=["right_wheel_joint", "left_wheel_joint"],
-            effort_limit_sim=100.0,
-            velocity_limit_sim=5.0,
+            effort_limit_sim=3.0,
+            velocity_limit_sim=15.0,
             stiffness=0.0,
-            damping=100.0,
+            damping=1.0,
         ),
     }
 )

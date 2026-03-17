@@ -36,7 +36,7 @@ def reset_robot_base_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, a
     return reset_root_state_uniform(env, env_ids, pose_range, velocity_range, asset_cfg)
 
 
-def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold: float = 0.8):
+def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold: float = 0.85):
     current_success = torch.mean(env.extras.get("success_rate", torch.tensor(0.0)))
     print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
 
@@ -46,13 +46,15 @@ def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold
         # Phase 1 -> 2: Add 45-degree orientation randomness
         if env.curr_level == 1:
             env.spawn_yaw_range = 0.785 # +/- 45 deg
+            env.active_x_pos = (1.0, 2.0)
             env.curr_level = 2
             print(f">>> Level 2: Orientation Enabled (Success: {current_success:.2f})")
             env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
             
         # Phase 2 -> 3: 10m Distance + Full 360 Orientation
         elif env.curr_level == 2:
-            env.active_x_pos = 10.0
+            env.active_y_range = (-0.25, 0.25)
+            env.active_x_pos = (2.0, 3.0)
             env.spawn_yaw_range = 3.1415 # Full 360
             env.curr_level = 3
             print(f">>> Level 3: 10m Distance + Full Heading")

@@ -20,6 +20,7 @@ from ict_bot import ICT_BOT_ASSETS_DIR
 # import mdp
 import ict_bot.tasks.e_corridor.mdp as mdp
 from isaaclab.assets import AssetBaseCfg
+from isaaclab.envs.mdp import JointVelocityActionCfg
 from isaaclab.sensors import MultiMeshRayCasterCfg, patterns, ContactSensorCfg, ImuCfg
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
@@ -104,6 +105,11 @@ class CorridorEnvSceneCfg(MoveStraightSceneCfg):
 class ActionsCfg(MoveStraightActionsCfg):
     """Action specifications for the MDP."""
 
+    wheel_action: JointVelocityActionCfg = JointVelocityActionCfg(
+        asset_name="robot",
+        joint_names=["right_wheel_joint", "left_wheel_joint"],
+        scale=5.0,
+    )
 
 
 @configclass
@@ -157,50 +163,54 @@ class RewardsCfg:
 
     # --- POSITIVE MOTIVATION ---
     progress = RewTerm(
-        func=mdp.progress_to_target,
-        weight=10.0,
+        func=mdp.reward_gated_progress_exponential,
+        weight=1.0,
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
-    align = RewTerm(
-        func=mdp.align_to_target,
-        weight=10.0,
+    
+    forward_vel = RewTerm(
+        func=mdp.forward_velocity_reward, 
+        weight=1.0, 
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
     reached = RewTerm(
-        func=mdp.target_reached,
-        weight=2000.0,
-        params={"robot_cfg": SceneEntityCfg("robot"), "distance": 0.8}
+        func=mdp.target_reached_reward_phased,
+        weight=1.0,
+        params={
+            "robot_cfg": SceneEntityCfg("robot"),
+            "distance": 0.3,
+        }
     )
 
     # --- NEGATIVE CONSTRAINTS ---
-    no_reverse = RewTerm(
-        func=mdp.penalty_anti_reverse, 
-        weight=-2.0, 
-        params={"robot_cfg": SceneEntityCfg("robot")}
-    )
 
     wall_dist = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-10.0,
+        weight=-15.0,
         params={"sensor_cfg": SceneEntityCfg("raycaster")}
     )
 
     stability = RewTerm(
-        func=mdp.imu_stability_reward,
-        weight=-0.1,
+        func=mdp.imu_stability_phased,
+        weight=1.0,
         params={"sensor_cfg": SceneEntityCfg("imu")}
     )
 
     action_rate = RewTerm(
-        func=mdp.action_rate_l2,
-        weight=-0.01,
+        func=mdp.action_rate_l2_phased,
+        weight=1.0,
+    )
+
+    joint_vel = RewTerm(
+        func=mdp.joint_vel_penalty_phased,
+        weight=1.0 
     )
 
     alive = RewTerm(
-        func=mdp.is_alive, 
-        weight=0.1
+        func=mdp.is_alive_phased,
+        weight=1.0,
     )
 
 
@@ -216,22 +226,16 @@ class MyEventCfg():
             "lidar_enabled": False,
             "curr_level": 1,
             "asset_cfg": SceneEntityCfg("robot"),
-            # "pose_range": {
-            #     "x": (0.0, 0.0), 
-            #     "y": (0.0, 0.0), 
-            #     "z": (0.1, 0.1),
-            #     "roll": (0.0, 0.0),
-            #     "pitch": (0.0, 0.0),
-            #     "yaw": (-3.14, 3.14),  # Random heading (Full 360 degrees)
-            # },
-            # "velocity_range": {}, # Sets all velocities to 0
         },
     )
 
     reset_target_position = EventTerm(
         func=mdp.reset_target_marker_location,
         mode="reset",
-        params={"y_range": (-0.1, 0.1), "x_pos": 3.0},
+        params={
+            "y_range": (-0.1, 0.1), 
+            "x_range": (0.9, 1.1)
+        },
     )
 
 
@@ -241,12 +245,18 @@ class TerminationsCfg():
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    target_reached = DoneTerm(
-        func=mdp.target_reached, 
+    no_progress = DoneTerm(
+        func=mdp.stagnation_termination,
         params={
-            "robot_cfg": SceneEntityCfg("robot"), 
-            "distance": 0.8, # 0.1m cone + 0.1m robot radius
-        } 
+            "robot_cfg": SceneEntityCfg("robot"),
+            "threshold": 0.01,
+            "time_limit": 2.0
+        }
+    )
+
+    reached_termination = DoneTerm(
+        func=mdp.target_reached, 
+        params={"robot_cfg": SceneEntityCfg("robot")} 
     )
 
     illegal_contact = DoneTerm(
@@ -265,7 +275,6 @@ class CurriculumCfg:
     # This will check the success rate every 100 steps
     adaptive_task = CurTerm(
         func=mdp.adaptive_curriculum,
-        params={"threshold": 0.8},
     )
 
 
@@ -297,7 +306,7 @@ class CorridorEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 2
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 45.0
+        self.episode_length_s = 30
         # simulation settings
         self.sim.dt = 1.0 / 100.0
 
@@ -327,13 +336,16 @@ class CorridorEnv(ManagerBasedRLEnv):
         # Initialize Curriculum Variables from Config
         # This allows PLAY mode to override them
         self.active_y_range = target_params.get("y_range", (-0.1, 0.1))
-        self.active_x_pos = target_params.get("x_pos", 3.0)
+        self.active_x_pos = target_params.get("x_range", (0.9, 1.1))
         self.spawn_yaw_range = robot_params.get("yaw_range", 0.0)
         self.lidar_enabled = robot_params.get("lidar_enabled", False)
         self.curr_level = robot_params.get("curr_level", 1)
         
         # Initialize Curriculum/Success Trackers
         self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
+
+        # timer to terminate if robot does not move
+        self.stagnation_timer = torch.zeros(self.num_envs, device=self.device)
         
         # Find wheel joint indices
         indices, _ = self.scene["robot"].find_joints(self.cfg.wheel_dof_name)
@@ -357,6 +369,8 @@ class CorridorEnv(ManagerBasedRLEnv):
             # We must pass the positions for ALL envs, or use a slice. 
             # The most robust way is to update all or use the visualizer's internal state.
             self.target_marker.visualize(self.target_pos)
+
+        self.stagnation_timer[env_ids] = 0.0
 
         current_root_pos = self.scene["robot"].data.root_pos_w[env_ids]
         self.prev_tgt_dist[env_ids] = torch.norm(self.target_pos[env_ids] - current_root_pos, dim=-1)

@@ -26,8 +26,8 @@ class IctBotCorridorEnvCfg(CorridorEnvCfg):
     # Physical properties
     wheel_radius = 0.1
     wheel_spacing = 0.16
-    max_linear_velocity = 0.6
-    max_angular_velocity = 3.5
+    max_linear_velocity = 1.0
+    max_angular_velocity = 4.0
     
     # Custom parameters/scales
     wheel_dof_name = [
@@ -48,13 +48,13 @@ class IctBotCorridorEnvCfg_PLAY(IctBotCorridorEnvCfg):
 
         if hasattr(self.events, "reset_target_position"):
             self.events.reset_target_position.params.update({
-                "y_range": (-0.1, 0.1),
-                "x_pos": 3.0,
+                "y_range": (-0.25, 0.25),
+                "x_range": (1.5, 3.0),
             })
             self.events.reset_robot_base.params.update({
-                "yaw_range": 0.785,
+                "yaw_range": 3.1415,
                 "lidar_enabled": False,
-                "curr_level": 2
+                "curr_level": 3
             })
 
         # disable randomization for play

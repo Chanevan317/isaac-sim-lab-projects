@@ -37,7 +37,7 @@ def heading_error(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
-def target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, distance: float = 0.8):
+def target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, distance: float = 0.29):
     robot = env.scene[robot_cfg.name]
 
     # Calculate distance (Ignoring Z is better for accuracy)
@@ -57,7 +57,7 @@ def target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, distance: 
     return reached
 
 
-def lidar_distances(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, max_distance: float = 0.5):
+def lidar_distances(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, max_distance: float = 1.0):
     """Returns normalized Lidar distances [0, 1]. 0 is hit, 1 is clear."""
     raycaster = env.scene[sensor_cfg.name]
 
