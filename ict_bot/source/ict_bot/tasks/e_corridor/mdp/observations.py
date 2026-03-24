@@ -37,29 +37,6 @@ def heading_error(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
-def target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, distance: float = 0.29):
-    robot = env.scene[robot_cfg.name]
-
-    # Calculate distance (Ignoring Z is better for accuracy)
-    diff = env.target_pos - robot.data.root_pos_w
-    diff[:, 2] = 0.0 
-    dist = torch.norm(diff, dim=-1)
-    
-    reached = (dist < distance)
-    
-    # Track the current success of this specific step
-    # Your wrapper/runner should handle the 'mean success' over episodes.
-    # If you are triggering level-ups based on env.extras, 
-    # use a momentum-based update instead:
-    if "success_rate" not in env.extras:
-        env.extras["success_rate"] = reached.float()
-    else:
-        # Smoothly update the rate (0.01 is a small alpha for a moving average)
-        env.extras["success_rate"] = 0.99 * env.extras["success_rate"] + 0.01 * reached.float()
-        
-    return reached
-
-
 def lidar_distances(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, max_distance: float = 2.0):
     """Returns normalized Lidar distances [0, 1]. 0 is hit, 1 is clear."""
     raycaster = env.scene[sensor_cfg.name]

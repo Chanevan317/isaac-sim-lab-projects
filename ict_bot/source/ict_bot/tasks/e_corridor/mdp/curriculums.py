@@ -37,23 +37,32 @@ def reset_robot_base_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, a
 
 
 def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold: float = 0.85):
-    current_success = torch.mean(env.extras.get("success_rate", torch.tensor(0.0)))
-    print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
+    # current_success = torch.mean(env.extras.get("success_rate", torch.tensor(0.0)))
+    # print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
 
     if not hasattr(env, "curr_level"): env.curr_level = 1
+    if not hasattr(env, "level_up_timer"): env.level_up_timer = 0
 
+    current_success = env.extras.get("success_rate", torch.tensor(0.0, device=env.device)).item()
+    print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
+
+    # Stability Check
     if current_success >= threshold:
-        # If using Isaac Lab's standard record_episode_statistics:
-        # if hasattr(env, "extras"):
-        #     # Clear the buffers so the mean success rate resets to 0
-        #     if "episode" in env.extras:
-        #         for key in env.extras["episode"]:
-        #             if isinstance(env.extras["episode"][key], torch.Tensor):
-        #                 env.extras["episode"][key].fill_(0)
-            
-        #     # If you are using a custom deque for success rate:
-        #     if hasattr(env, "success_buf"):
-        #         env.success_buf.clear()
+        env.level_up_timer += 1
+    else:
+        env.level_up_timer = 0
+
+    # Only level up if it's been successful for a sustained period
+    if env.curr_level <= 2:
+        ready_to_level_up = (env.level_up_timer > 1000)
+    elif env.curr_level <= 4:
+        ready_to_level_up = (env.level_up_timer > 3000)
+    else:
+        ready_to_level_up = (env.level_up_timer > 7500)
+
+    if ready_to_level_up:
+        # Reset the timer for the next level
+        env.level_up_timer = 0
 
         # Phase 1 -> 2: Add 45-degree orientation randomness
         if env.curr_level == 1:
@@ -62,7 +71,6 @@ def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold
             env.active_x_pos = (1.0, 2.0)
             env.curr_level = 2
             print(f">>> Level 2: Orientation 90 deg")
-            env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
         
         # Phase 2 -> 3: Add 45-degree orientation randomness
         elif env.curr_level == 2:
@@ -71,7 +79,6 @@ def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold
             env.active_x_pos = (1.5, 3.0)
             env.curr_level = 3
             print(f">>> Level 3: Orientation 210 deg")
-            env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
 
         # Phase 3 -> 4:  Full 360 Orientation
         elif env.curr_level == 3:
@@ -79,20 +86,17 @@ def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold
             env.spawn_yaw_range = 3.1415 # Full 360
             env.curr_level = 4
             print(f">>> Level 4: Full Heading")
-            env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
 
         # Phase 4 -> 5: Unlock IMU
         elif env.curr_level == 4:
             env.curr_level = 5
             print(f">>> Level 5: IMU Observation unlocked")
-            env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
 
         # Phase 5 -> 6: Unlock Lidar
         elif env.curr_level == 5:
             env.lidar_enabled = True 
             env.curr_level = 6
             print(f">>> Level 6: LIDAR Observation unlocked")
-            env.extras["success_rate"] = torch.zeros_like(env.extras["success_rate"])
 
 
         if hasattr(env, "runner"):
@@ -134,3 +138,9 @@ def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold
                 agent._entropy_loss_scale = new_entropy
                 
             print(f">>> LEVEL UP: {env.curr_level} | Setting LR: {new_lr}, Entropy: {new_entropy}")
+
+
+        # When leveling up, wipe the success rate history 
+        # so the new level starts from 0.0
+        env.extras["success_rate"] = torch.tensor(0.0, device=env.device)
+        print(f">>> LEVEL UP TO {env.curr_level} | Progress Reset.")

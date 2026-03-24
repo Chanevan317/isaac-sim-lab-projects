@@ -20,7 +20,7 @@ class IctBotCorridorEnvCfg(CorridorEnvCfg):
 
     # Action/Observation/State spaces
     action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 88  # 316 = 3 (root pos) + 4 (root quat) + 2*2 (wheel joint pos/vel) + 72 (raycast)
+    observation_space = 87 # [RelPos(3), Head(2), WheelVel(2), Lidar(72), IMU(6), LastAct(2)]
     state_space = 0
     
     # Physical properties

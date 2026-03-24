@@ -120,34 +120,39 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        # 1. Position to Target
+        # 1. Targeting (Essential for navigation)
         rel_target = ObsTerm(
-            func=mdp.rel_target_pos,
+            func=mdp.rel_target_pos, 
             params={"robot_cfg": SceneEntityCfg("robot")}
-        )
+        )   # [3]
 
-        # 2. Heading Error
         heading = ObsTerm(
-            func=mdp.heading_error,
+            func=mdp.heading_error, 
             params={"robot_cfg": SceneEntityCfg("robot")}
-        )
+        )   # [2]
 
-        # 3. Lidar with History
-        lidar = ObsTerm(
-            func=mdp.lidar_distances,
-            params={"sensor_cfg": SceneEntityCfg("raycaster")},
-            history_length=3,
-            flatten_history_dim=True
-        )
-
-        # 4. IMU Data
-        imu = ObsTerm(
-            func=mdp.imu_observations,
-            params={"sensor_cfg": SceneEntityCfg("imu")}
-        )
+        # 2. Proprioception (Fixes the "weird" movement/speed control)
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel
+        )   # [2] - Required for real-world motor control
         
-        # 5. Actions History (Helps with smoothness)
-        last_action = ObsTerm(func=mdp.last_action, history_length=1)
+        # 3. Environment (Reduced to history_length=1 for stability)
+        lidar = ObsTerm(
+            func=mdp.lidar_distances, 
+            params={"sensor_cfg": SceneEntityCfg("raycaster")},
+            history_length=1 # Remove history here; the LSTM/RNN or Last Action handles timing better
+        )   # [72]
+
+        # 4. Stability & Physics (Essential for real-world IMU)
+        imu = ObsTerm(
+            func=mdp.imu_observations, 
+            params={"sensor_cfg": SceneEntityCfg("imu")}
+        )   # [6]
+        
+        # 5. Smoothness
+        last_action = ObsTerm(
+            func=mdp.last_action
+        )   # [2]
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -176,12 +181,9 @@ class RewardsCfg:
     )
 
     reached = RewTerm(
-        func=mdp.target_reached_reward_phased,
+        func=mdp.target_reached_reward,
         weight=1.0,
-        params={
-            "robot_cfg": SceneEntityCfg("robot"),
-            "distance": 0.3,
-        }
+        params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
     # --- NEGATIVE CONSTRAINTS ---
@@ -251,7 +253,7 @@ class TerminationsCfg():
     )
 
     reached_termination = DoneTerm(
-        func=mdp.target_reached, 
+        func=mdp.target_reached_termination, 
         params={"robot_cfg": SceneEntityCfg("robot")} 
     )
 
@@ -337,7 +339,9 @@ class CorridorEnv(ManagerBasedRLEnv):
         self.curr_level = robot_params.get("curr_level", 1)
         
         # Initialize Curriculum/Success Trackers
-        self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
+        # self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
+        self.extras["success_rate"] = torch.tensor(0.0, device=self.device) # Change to scalar for mean tracking
+        self.level_up_timer = 0  # Track steps spent above success threshold
 
         # timer to terminate if robot does not move
         self.stagnation_timer = torch.zeros(self.num_envs, device=self.device)
@@ -348,7 +352,8 @@ class CorridorEnv(ManagerBasedRLEnv):
 
         # Use the config from the EnvCfg
         self.target_marker = VisualizationMarkers(self.cfg.target_marker_cfg)
-    
+
+
     def _reset_idx(self, env_ids: Sequence[int] | None) -> None:
         """Reset selected environments."""
         super()._reset_idx(env_ids)
@@ -383,6 +388,7 @@ class CorridorEnv(ManagerBasedRLEnv):
             joint_ids=self._wheel_indices,
             env_ids=env_ids,
         )
+
 
     def _step_impl(self, actions: torch.Tensor):
         # Calculate 2D distance by zeroing out the Z difference

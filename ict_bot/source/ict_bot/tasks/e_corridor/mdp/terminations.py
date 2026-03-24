@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from ict_bot.tasks.e_corridor.mdp.observations import rel_target_pos
+from .common import check_target_reached
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -21,11 +21,15 @@ def time_out(env: ManagerBasedRLEnv) -> torch.Tensor:
     limit = 30.0
     if getattr(env, "curr_level", 1) >= 3:
         limit = 45.0
-    # if getattr(env, "curr_level", 1) >= 4:
-    #     limit = 100
+    if getattr(env, "curr_level", 1) >= 5:
+        limit = 60
         
     # Return a boolean tensor of environments that exceeded their specific limit
     return current_time_s >= limit
+
+
+def target_reached_termination(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+    return check_target_reached(env, robot_cfg)
 
 
 def stagnation_termination(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
