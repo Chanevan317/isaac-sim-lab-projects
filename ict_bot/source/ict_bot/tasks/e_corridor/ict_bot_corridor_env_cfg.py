@@ -46,15 +46,7 @@ class IctBotCorridorEnvCfg_PLAY(IctBotCorridorEnvCfg):
         # make a smaller scene for play
         self.scene.num_envs = 1
 
-        if hasattr(self.events, "reset_target_position"):
-            self.events.reset_target_position.params.update({
-                "y_range": (-0.135, 0.135),
-                "x_range": (1.5, 3.0),
-            })
-            self.events.reset_robot_base.params.update({
-                "yaw_range": 3.1415,
-                "curr_level": 6
-            })
+        self.fixed_play_level = 3
 
         # disable randomization for play
         self.observations.policy.enable_corruption = False

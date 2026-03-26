@@ -10,115 +10,74 @@ if TYPE_CHECKING:
     from isaaclab.managers import SceneEntityCfg
 
 
-def reset_robot_base_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, asset_cfg: SceneEntityCfg, yaw_range: float = 0.0, lidar_enabled: bool = False, curr_level: int = 1):
-    """Wrapper that pulls dynamic yaw/pos from env and calls the built-in reset."""
-
-    # FRONT is -Y, TARGET is +X. 
-    # To point local -Y to world +X, base yaw must be -1.5708 rad (-90 deg)
-    base_yaw = 1.5708 
-    
-    # Pull dynamic range from the env (set by your curriculum function)
-    yaw_range = getattr(env, "spawn_yaw_range", 0.0) 
-    
-    # Define the dynamic pose range
-    pose_range = {
-        "x": (0.0, 0.0), 
-        "y": (0.0, 0.0), 
-        "z": (0.1, 0.1),
-        "roll": (0.0, 0.0),
-        "pitch": (0.0, 0.0),
-        "yaw": (base_yaw - yaw_range, base_yaw + yaw_range),
-    }
-
-    velocity_range = {}
-
-    # Call the built-in Isaac Lab function with our dynamic range
-    return reset_root_state_uniform(env, env_ids, pose_range, velocity_range, asset_cfg)
-
-
 def adaptive_curriculum(env: ManagerBasedRLEnv, env_ids: torch.Tensor, threshold: float = 0.85):
-    # current_success = torch.mean(env.extras.get("success_rate", torch.tensor(0.0)))
-    # print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
+    # Check if a fixed level is defined in the config
+    # We look for 'fixed_play_level' which we just added above
+    fixed_level = getattr(env.cfg, "fixed_play_level", None)
 
-    if not hasattr(env, "curr_level"): env.curr_level = 1
+    if fixed_level is not None:
+        env.curr_level = fixed_level
+    else:
+        # Normal training logic: Initialize if not present
+        if not hasattr(env, "curr_level"): env.curr_level = 1
+
+    # Standard setup
     if not hasattr(env, "level_up_timer"): env.level_up_timer = 0
+    
+    # If we are in "Fixed Level" mode, we EXIT early 
+    # This prevents the timer from running or the LR from changing
+    if fixed_level is not None:
+        return 
+
+    # if not hasattr(env, "curr_level"): env.curr_level = 1
+    # if not hasattr(env, "level_up_timer"): env.level_up_timer = 0
+    if not hasattr(env, "curriculum_step_counter"): env.curriculum_step_counter = 0
 
     current_success = env.extras.get("success_rate", torch.tensor(0.0, device=env.device)).item()
     print(f"DEBUG: Level: {getattr(env, 'curr_level', 'N/A')} | Success: {current_success:.4f}")
 
-    # Stability Check
+    # Increment a true timestep counter (this function is called every step via reset events,
+    # but we want to count env steps, not individual env resets)
+    env.curriculum_step_counter += 1
+
+    # Stability check in actual env steps
     if current_success >= threshold:
         env.level_up_timer += 1
     else:
         env.level_up_timer = 0
 
-    # Only level up if it's been successful for a sustained period
-    if env.curr_level <= 2:
-        ready_to_level_up = (env.level_up_timer > 1000)
-    elif env.curr_level <= 4:
-        ready_to_level_up = (env.level_up_timer > 3000)
+    if env.curr_level == 1:
+        ready_to_level_up = (env.level_up_timer > 1000) 
+    elif env.curr_level == 2:
+        ready_to_level_up = (env.level_up_timer > 3000)  
     else:
-        ready_to_level_up = (env.level_up_timer > 7500)
+        ready_to_level_up = (env.level_up_timer > 6000)   
 
     if ready_to_level_up:
+
         # Reset the timer for the next level
         env.level_up_timer = 0
 
-        # Phase 1 -> 2: Add 45-degree orientation randomness
+        # Phase 1 -> 2: Add static obstacles
         if env.curr_level == 1:
-            env.active_y_range = (-0.25, 0.25)
-            env.spawn_yaw_range = 0.785 # +/- 45 deg
-            env.active_x_pos = (1.0, 2.0)
             env.curr_level = 2
-            print(f">>> Level 2: Orientation 90 deg")
+            print(f">>> Level 2: Static Obstacle Avoidance")
         
-        # Phase 2 -> 3: Add 45-degree orientation randomness
+        # Phase 2 -> 3: Add dynamic obstacles
         elif env.curr_level == 2:
-            env.active_y_range = (-0.75, 0.75)
-            env.spawn_yaw_range = 1.8326 # +/- 105 deg
-            env.active_x_pos = (1.5, 3.0)
             env.curr_level = 3
-            print(f">>> Level 3: Orientation 210 deg")
-
-        # Phase 3 -> 4:  Full 360 Orientation
-        elif env.curr_level == 3:
-            env.active_y_range = (-1.35, 1.35)
-            env.spawn_yaw_range = 3.1415 # Full 360
-            env.curr_level = 4
-            print(f">>> Level 4: Full Heading")
-
-        # Phase 4 -> 5: Unlock IMU
-        elif env.curr_level == 4:
-            env.curr_level = 5
-            print(f">>> Level 5: IMU Observation unlocked")
-
-        # Phase 5 -> 6: Unlock Lidar
-        elif env.curr_level == 5:
-            env.lidar_enabled = True 
-            env.curr_level = 6
-            print(f">>> Level 6: LIDAR Observation unlocked")
+            print(f">>> Level 3: Dynamic Obstable Avoidance")
 
 
         if hasattr(env, "runner"):
             agent = env.runner.agent
             
             # --- Professional Hyperparameter Strategy ---
-            if env.curr_level <= 2:
-                # Base learning for simple forward movement
-                new_lr = 3e-4 
+            if env.curr_level == 2:
+                new_lr = 4e-4 
                 new_entropy = 0.01 
             elif env.curr_level == 3:
-                # Step up: Moderate boost to handle wider target angles
                 new_lr = 4e-4 
-                new_entropy = 0.02
-            elif env.curr_level == 4:
-                # The Pivot: High energy and exploration to discover the 180-degree turn
-                new_lr = 5e-4 
-                new_entropy = 0.05
-            else: # Level 5 and 6 (Sensors/IMU/Lidar)
-                # Mastery: Lower the values to "cool down" the policy. 
-                # This stops the jitter and allows the robot to learn precise sensor-based steering.
-                new_lr = 3e-4 
                 new_entropy = 0.02
 
             # 1. Update the Optimizer (Current Weights)

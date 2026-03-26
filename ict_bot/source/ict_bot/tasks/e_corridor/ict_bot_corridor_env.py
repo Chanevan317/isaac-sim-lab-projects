@@ -168,15 +168,8 @@ class RewardsCfg:
 
     # --- POSITIVE MOTIVATION ---
     progress = RewTerm(
-        func=mdp.reward_gated_progress_exponential,
+        func=mdp.reward_navigate_to_target,
         weight=1.0,
-        params={"robot_cfg": SceneEntityCfg("robot")}
-    )
-
-    
-    forward_vel = RewTerm(
-        func=mdp.forward_velocity_reward, 
-        weight=1.0, 
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
@@ -201,18 +194,18 @@ class RewardsCfg:
     )
 
     action_rate = RewTerm(
-        func=mdp.action_rate_l2_phased,
-        weight=1.0,
+        func=mdp.action_rate_l2,
+        weight=-0.01,
     )
 
     joint_vel = RewTerm(
-        func=mdp.joint_vel_penalty_phased,
-        weight=1.0 
+        func=mdp.joint_vel_l2,
+        weight=-0.0005 
     )
 
     alive = RewTerm(
-        func=mdp.is_alive_phased,
-        weight=1.0,
+        func=mdp.is_alive,
+        weight=-0.3,
     )
 
 
@@ -221,13 +214,19 @@ class MyEventCfg():
     """Event specifications for the MDP."""
 
     reset_robot_base = EventTerm(
-        func=mdp.reset_robot_base_curriculum,
+        func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "yaw_range": 0.0,
-            "lidar_enabled": False,
-            "curr_level": 1,
             "asset_cfg": SceneEntityCfg("robot"),
+            "pose_range": {
+                "x": (0.0, 0.0), 
+                "y": (0.0, 0.0), 
+                "z": (0.1, 0.1),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (-3.1415, 3.1415),
+            },
+            "velocity_range": {}
         },
     )
 
@@ -235,8 +234,8 @@ class MyEventCfg():
         func=mdp.reset_target_marker_location,
         mode="reset",
         params={
-            "y_range": (-0.1, 0.1), 
-            "x_range": (0.9, 1.1)
+            "y_range": (-1.25, 1.25), 
+            "x_range": (1.0, 3.0)
         },
     )
 
@@ -304,7 +303,7 @@ class CorridorEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 2
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 45.0
+        self.episode_length_s = 40.0
         # simulation settings
         self.sim.dt = 1.0 / 100.0
 
@@ -325,18 +324,6 @@ class CorridorEnv(ManagerBasedRLEnv):
         self.prev_tgt_dist = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
 
         super().__init__(cfg, render_mode, **kwargs)
-
-        # Access the event parameters
-        target_params = self.cfg.events.reset_target_position.params
-        # We'll assume you add these new keys to your EventCfg (see below)
-        robot_params = self.cfg.events.reset_robot_base.params
-
-        # Initialize Curriculum Variables from Config
-        # This allows PLAY mode to override them
-        self.active_y_range = target_params.get("y_range", (-0.1, 0.1))
-        self.active_x_pos = target_params.get("x_range", (0.9, 1.1))
-        self.spawn_yaw_range = robot_params.get("yaw_range", 0.0)
-        self.curr_level = robot_params.get("curr_level", 1)
         
         # Initialize Curriculum/Success Trackers
         # self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
