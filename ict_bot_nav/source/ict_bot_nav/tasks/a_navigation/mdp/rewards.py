@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import torch
 from .common import check_target_reached
 from isaaclab.utils.math import quat_inv, quat_apply
+from .observations import rel_target_pos
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv

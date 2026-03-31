@@ -177,7 +177,7 @@ class MyEventCfg():
 
     randomize_wheel_friction = EventTerm(
         func=mdp.randomize_rigid_body_material,
-        mode="prestartup",
+        mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=[".*wheel_joint"]),
             "static_friction_range": (0.5, 1.5),
@@ -187,22 +187,10 @@ class MyEventCfg():
         }
     )
 
-    randomize_floor_friction = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="prestartup",
-        params={
-            "asset_cfg": SceneEntityCfg("ground_plane"),
-            "static_friction_range": (0.3, 1.0),
-            "dynamic_friction_range": (0.2, 0.8),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 250,
-        }
-    )
-
     # Robot mass randomization — accounts for payload, battery charge variation
     randomize_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
-        mode="prestartup",
+        mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
             "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
@@ -295,6 +283,9 @@ class NavigationEnv(ManagerBasedRLEnv):
         # Initialize Curriculum/Success Trackers
         # self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
         self.extras["success_rate"] = torch.tensor(0.0, device=self.device) # Change to scalar for mean tracking
+
+        # timer to terminate if robot does not move
+        self.stagnation_timer = torch.zeros(self.num_envs, device=self.device)
         
         # Find wheel joint indices
         indices, _ = self.scene["robot"].find_joints(self.cfg.wheel_dof_name)

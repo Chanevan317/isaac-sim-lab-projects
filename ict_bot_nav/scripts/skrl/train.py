@@ -217,6 +217,47 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner = Runner(env, agent_cfg)
     env.unwrapped.runner = runner
 
+
+    # ---- ADD THIS BLOCK ----
+    import torch
+    ep_rewards = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_lengths = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_count = 0
+
+    original_record_transition = runner.agent.record_transition
+
+    def custom_record_transition(states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps):
+        nonlocal ep_rewards, ep_lengths, ep_count
+
+        original_record_transition(states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps)
+
+        ep_rewards += rewards.squeeze(-1)
+        ep_lengths += 1
+        dones = (terminated | truncated).squeeze(-1)
+
+        if dones.any():
+            finished_rewards = ep_rewards[dones]
+            finished_lengths = ep_lengths[dones]
+            ep_count += dones.sum().item()
+
+            print("\n" + "=" * 60)
+            print(f"  Episode Count     : {int(ep_count)}")
+            print(f"  Timestep          : {timestep} / {timesteps}  ({100*timestep/timesteps:.1f}%)")
+            print(f"  Envs finished     : {dones.sum().item():.0f} / {env_cfg.scene.num_envs}")
+            print(f"  Mean Episode Ret  : {finished_rewards.mean().item():.4f}  <- should trend UP")
+            print(f"  Max Episode Ret   : {finished_rewards.max().item():.4f}")
+            print(f"  Min Episode Ret   : {finished_rewards.min().item():.4f}")
+            print(f"  Mean Episode Len  : {finished_lengths.mean().item():.1f}  <- should trend DOWN")
+            print(f"  Max Episode Len   : {finished_lengths.max().item():.1f}")
+            print("=" * 60)
+
+            ep_rewards[dones] = 0.0
+            ep_lengths[dones] = 0.0
+
+    runner.agent.record_transition = custom_record_transition
+    # ---- END BLOCK ----
+
+
     # load checkpoint (if specified)
     if resume_path:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
