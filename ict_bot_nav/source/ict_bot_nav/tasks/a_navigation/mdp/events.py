@@ -6,22 +6,20 @@ import torch
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+    from isaaclab.managers import SceneEntityCfg
 
 
-def reset_target_marker_location(env: ManagerBasedRLEnv, env_ids: torch.Tensor, y_range: tuple[float, float], x_range: tuple[float, float]):
-    num_resets = len(env_ids)
-    device = env.device
-    
-    # 1. Check if the curriculum has updated these values on the 'env'
-    # Otherwise, use the 'y_range' and 'x_range' passed from the config
-    current_y_range = getattr(env, "active_y_range", y_range)
-    current_x_range = getattr(env, "active_x_pos", x_range)
-    
-    # 2. Randomize as usual
-    y_local = torch.empty(num_resets, device=device).uniform_(*current_y_range)
-    x_local = torch.empty(num_resets, device=device).uniform_(*current_x_range)
-    
-    # 3. Apply to world space
-    env.target_pos[env_ids, 0] = x_local + env.scene.env_origins[env_ids, 0]
-    env.target_pos[env_ids, 1] = y_local + env.scene.env_origins[env_ids, 1]
-    env.target_pos[env_ids, 2] = env.scene.env_origins[env_ids, 2] + 0.25
+def reset_target_marker_location(env: ManagerBasedRLEnv, env_ids: torch.Tensor, min_distance: float = 1.0, max_distance: float = 3.0):
+    """Spawns target at random distance and angle around each robot."""
+    robot = env.scene["robot"]
+    robot_pos = robot.data.root_pos_w[env_ids]
+
+    n = len(env_ids)
+    # Random angle — full 360°
+    angle = torch.rand(n, device=env.device) * 2 * torch.pi
+    # Random distance
+    dist = min_distance + torch.rand(n, device=env.device) * (max_distance - min_distance)
+
+    env.target_pos[env_ids, 0] = robot_pos[:, 0] + dist * torch.cos(angle)
+    env.target_pos[env_ids, 1] = robot_pos[:, 1] + dist * torch.sin(angle)
+    env.target_pos[env_ids, 2] = 0.25  # fixed height for marker visibility

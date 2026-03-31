@@ -23,12 +23,12 @@ from isaaclab.envs.mdp import JointVelocityActionCfg
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.managers import CurriculumTermCfg as CurTerm
 from isaaclab.utils import configclass
 
 
@@ -38,14 +38,14 @@ from isaaclab.utils import configclass
 
 
 @configclass
-class NavigationEnvSceneCfg(SceneEntityCfg):
+class NavigationEnvSceneCfg(InteractiveSceneCfg):
     """Configuration for the scene."""
 
     def __post_init__(self):
         super().__post_init__()
 
     # world
-    ground = AssetBaseCfg(
+    ground_plane = AssetBaseCfg(
         prim_path="/World/ground",
         spawn=sim_utils.GroundPlaneCfg(),
     )
@@ -58,18 +58,6 @@ class NavigationEnvSceneCfg(SceneEntityCfg):
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=2500.0),
     )
-
-
-    # corridor scene asset
-    scene = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/obstacles",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=os.path.join(ICT_BOT_ASSETS_DIR, "scenes", "corridor.usd"),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-        ),
-    )
-
 
 
 ##
@@ -131,41 +119,29 @@ class RewardsCfg:
 
     # --- POSITIVE MOTIVATION ---
     
-
+    progress = RewTerm(
+        func=mdp.velocity_toward_target,
+        weight=1.0,
+        params={"robot_cfg": SceneEntityCfg("robot")}
+    )
 
     reached = RewTerm(
         func=mdp.target_reached_reward,
-        weight=100.0,
+        weight=10.0,
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
     # --- NEGATIVE CONSTRAINTS ---
 
-    action_rate = RewTerm(
-        func=mdp.action_rate_l2,
-        weight=-50,
+    backward = RewTerm(
+        func=mdp.penalize_backwards_movement,
+        weight=-1.0,
+        params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-0.01,
-    )
-
-    alive = RewTerm(
-        func=mdp.is_alive,
-        weight=-1.0,
-    )
-
-    # --- LEVEL 2+ ONLY (functions return 0 at level 1) ---
-    stability = RewTerm(
-        func=mdp.imu_stability,
-        weight=-2.0,
-        params={"sensor_cfg": SceneEntityCfg("imu")}
-    )
-    wall_dist = RewTerm(
-        func=mdp.lidar_proximity_penalty,
-        weight=-30.0,
-        params={"sensor_cfg": SceneEntityCfg("raycaster")}
     )
 
 
@@ -194,9 +170,59 @@ class MyEventCfg():
         func=mdp.reset_target_marker_location,
         mode="reset",
         params={
-            "y_range": (-1.25, 1.25), 
-            "x_range": (1.0, 3.0)
+            "min_distance": 1.0,
+            "max_distance": 3.0,
         },
+    )
+
+    randomize_wheel_friction = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="prestartup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*wheel_joint"]),
+            "static_friction_range": (0.5, 1.5),
+            "dynamic_friction_range": (0.4, 1.2),
+            "restitution_range": (0.0, 0.1),
+            "num_buckets": 250,
+        }
+    )
+
+    randomize_floor_friction = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="prestartup",
+        params={
+            "asset_cfg": SceneEntityCfg("ground_plane"),
+            "static_friction_range": (0.3, 1.0),
+            "dynamic_friction_range": (0.2, 0.8),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 250,
+        }
+    )
+
+    # Robot mass randomization — accounts for payload, battery charge variation
+    randomize_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="prestartup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
+            "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
+            "operation": "scale",
+        }
+    )
+
+    # Push randomization — random impulses simulate bumps and disturbances
+    push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(3.0, 6.0),  # random push every 3–6 seconds
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "velocity_range": {
+                "x": (-0.3, 0.3),
+                "y": (-0.3, 0.3),
+                "yaw": (-0.5, 0.5),
+            }
+        }
     )
 
 
@@ -206,10 +232,10 @@ class TerminationsCfg():
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    # no_progress = DoneTerm(
-    #     func=mdp.stagnation_termination,
-    #     params={"robot_cfg": SceneEntityCfg("robot")}
-    # )
+    no_progress = DoneTerm(
+        func=mdp.stagnation_termination,
+        params={"robot_cfg": SceneEntityCfg("robot")}
+    )
 
     reached_termination = DoneTerm(
         func=mdp.target_reached_termination, 
@@ -242,7 +268,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 4
+        self.decimation = 5
         self.sim.render_interval = self.decimation
         self.episode_length_s = 20.0
         # simulation settings
@@ -269,10 +295,6 @@ class NavigationEnv(ManagerBasedRLEnv):
         # Initialize Curriculum/Success Trackers
         # self.extras["success_rate"] = torch.zeros(self.num_envs, device=self.device)
         self.extras["success_rate"] = torch.tensor(0.0, device=self.device) # Change to scalar for mean tracking
-        self.level_up_timer = 0  # Track steps spent above success threshold
-
-        # timer to terminate if robot does not move
-        self.stagnation_timer = torch.zeros(self.num_envs, device=self.device)
         
         # Find wheel joint indices
         indices, _ = self.scene["robot"].find_joints(self.cfg.wheel_dof_name)

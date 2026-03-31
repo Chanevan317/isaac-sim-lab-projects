@@ -5,7 +5,7 @@
 
 # import mdp
 from isaaclab.utils import configclass
-from ict_bot_nav.source.ict_bot_nav.tasks.a_navigation.ict_bot_navigation_env import NavigationEnvCfg
+from ict_bot_nav.tasks.a_navigation.ict_bot_navigation_env import NavigationEnvCfg
 
 ##
 # Scene definition
@@ -26,8 +26,8 @@ class IctBotNavigationEnvCfg(NavigationEnvCfg):
     # Physical properties
     wheel_radius = 0.1
     wheel_spacing = 0.16
-    max_linear_velocity = 1.0
-    max_angular_velocity = 1.5
+    max_linear_velocity = 0.5
+    max_angular_velocity = 6.25
     
     # Custom parameters/scales
     wheel_dof_name = [

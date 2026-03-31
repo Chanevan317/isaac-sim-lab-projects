@@ -13,7 +13,7 @@ from . import agents
 
 
 gym.register(
-    id="Ict-Bot-Corridor-v0",
+    id="Ict-Bot-Navigation-v0",
     entry_point=f"{__name__}.ict_bot_navigation_env:NavigationEnv",
     disable_env_checker=True,
     kwargs={
@@ -24,7 +24,7 @@ gym.register(
 
 
 gym.register(
-    id="Ict-Bot-Corridor-Play-v0",
+    id="Ict-Bot-Navigation-Play-v0",
     entry_point=f"{__name__}.ict_bot_navigation_env:NavigationEnv",
     disable_env_checker=True,
     kwargs={

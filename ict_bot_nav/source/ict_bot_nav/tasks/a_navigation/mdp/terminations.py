@@ -20,7 +20,7 @@ def stagnation_termination(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     linear_speed = torch.norm(robot.data.root_lin_vel_w[:, :2], dim=-1)
     angular_speed = torch.abs(robot.data.root_ang_vel_w[:, 2]) # Yaw rate
     
-    min_lin, min_ang, time_limit = 0.05, 0.1, 5.0 
+    min_lin, min_ang, time_limit = 0.02, 0.05, 8.0
     
     # 3. Are we stuck? (Not moving fast enough linearly AND not turning fast enough)
     stuck = (linear_speed < min_lin) & (angular_speed < min_ang)
