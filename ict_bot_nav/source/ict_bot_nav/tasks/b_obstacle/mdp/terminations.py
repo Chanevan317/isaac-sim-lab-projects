@@ -10,23 +10,6 @@ if TYPE_CHECKING:
     from isaaclab.managers import SceneEntityCfg
 
 
-def time_out(env: ManagerBasedRLEnv) -> torch.Tensor:
-    # Convert current step buffer to seconds
-    # (episode_length_buf counts steps, so we multiply by dt * decimation)
-    current_time_s = env.episode_length_buf * env.step_dt
-    
-    # Determine the limit based on the level
-    # Default to 30s if level is 1 or 2
-    limit = 20.0
-    if getattr(env, "curr_level", 1) == 2:
-        limit = 30.0
-    if getattr(env, "curr_level", 1) == 3:
-        limit = 40
-        
-    # Return a boolean tensor of environments that exceeded their specific limit
-    return current_time_s >= limit
-
-
 def target_reached_termination(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     return check_target_reached(env, robot_cfg)
 
@@ -37,7 +20,7 @@ def stagnation_termination(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     linear_speed = torch.norm(robot.data.root_lin_vel_w[:, :2], dim=-1)
     angular_speed = torch.abs(robot.data.root_ang_vel_w[:, 2]) # Yaw rate
     
-    min_lin, min_ang, time_limit = 0.05, 0.1, 5.0 
+    min_lin, min_ang, time_limit = 0.02, 0.05, 10.0
     
     # 3. Are we stuck? (Not moving fast enough linearly AND not turning fast enough)
     stuck = (linear_speed < min_lin) & (angular_speed < min_ang)

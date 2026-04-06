@@ -23,8 +23,7 @@ def rel_target_pos(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     
     # Rotate into robot's local frame
     q_inv = quat_inv(robot.data.root_quat_w)
-    local_pos = quat_apply(q_inv, pos_w) # [N, 3]
-    return local_pos[:, :2] # drop z, return [N, 2]
+    return quat_apply(q_inv, pos_w)
 
 
 def heading_error(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
@@ -36,8 +35,3 @@ def heading_error(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     
     # Return as a 2-element vector per environment
     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
-
-
-def lidar_scan(env: ManagerBasedRLEnv, num_beams: int = 72):
-    """Returns zeros for task 1. Real lidar activates in task 2."""
-    return torch.zeros(env.num_envs, num_beams, device=env.device)

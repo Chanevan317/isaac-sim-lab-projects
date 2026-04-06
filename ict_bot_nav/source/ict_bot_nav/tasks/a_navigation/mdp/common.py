@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from isaaclab.managers import SceneEntityCfg
 
 
-def check_target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, threshold: float = 0.1):
+def check_target_reached(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg, threshold: float = 0.3):
     robot = env.scene[robot_cfg.name]
 
     # Calculate distance ignoring Z

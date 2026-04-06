@@ -14,6 +14,7 @@ a more user-friendly way.
 
 import argparse
 import sys
+from unittest import runner
 
 from isaaclab.app import AppLauncher
 
@@ -218,68 +219,134 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env.unwrapped.runner = runner
 
 
-    # ---- ADD THIS BLOCK ----
+    # ---- TRAINING LOGS ----
     import torch
+
     ep_rewards = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_lengths = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_distance_traveled = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_count = 0
+    prev_robot_pos = None
 
     original_record_transition = runner.agent.record_transition
 
-    def custom_record_transition(states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps):
+    def custom_record_transition(
+        states, actions, rewards, next_states,
+        terminated, truncated, infos, timestep, timesteps
+    ):
         nonlocal ep_rewards, ep_lengths, ep_count
+        nonlocal ep_distance_traveled, prev_robot_pos
 
-        original_record_transition(states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps)
+        original_record_transition(
+            states, actions, rewards, next_states,
+            terminated, truncated, infos, timestep, timesteps
+        )
 
         ep_rewards += rewards.squeeze(-1)
         ep_lengths += 1
+
+        # Track distance traveled per step
+        robot_pos = env.scene["robot"].data.root_pos_w[:, :2].clone()
+        if prev_robot_pos is not None:
+            step_dist = torch.norm(robot_pos - prev_robot_pos, dim=-1)
+            ep_distance_traveled += step_dist
+        prev_robot_pos = robot_pos
+
         dones = (terminated | truncated).squeeze(-1)
 
         if dones.any():
-            finished_rewards = ep_rewards[dones]
-            finished_lengths = ep_lengths[dones]
+            if not hasattr(custom_record_transition, "accum_rewards"):
+                custom_record_transition.accum_rewards    = []
+                custom_record_transition.accum_lengths    = []
+                custom_record_transition.accum_advances   = []
+                custom_record_transition.accum_distances  = []
+                custom_record_transition.accum_timeouts   = []
+                custom_record_transition.accum_stagnations = []
+
+            custom_record_transition.accum_rewards.append(ep_rewards[dones].clone())
+            custom_record_transition.accum_lengths.append(ep_lengths[dones].clone())
+            custom_record_transition.accum_distances.append(ep_distance_traveled[dones].clone())
+
+            # Read actual carrot advance count for finished envs
+            if hasattr(env, "carrot_advance_count"):
+                custom_record_transition.accum_advances.append(
+                    env.carrot_advance_count[dones].clone()
+                )
+                # Reset counter for envs that just finished
+                # Note: _reset_idx also resets this but it fires after record_transition
+                # so we reset here to avoid double-counting in edge cases
+                env.carrot_advance_count[dones] = 0.0
+
+            # Classify termination type
+            timed_out  = truncated.squeeze(-1)[dones]
+            stagnated  = terminated.squeeze(-1)[dones]
+            custom_record_transition.accum_timeouts.append(timed_out.float())
+            custom_record_transition.accum_stagnations.append(stagnated.float())
+
             ep_count += dones.sum().item()
 
-            # Accumulate for periodic reporting
-            if not hasattr(custom_record_transition, "accum_rewards"):
-                custom_record_transition.accum_rewards = []
-                custom_record_transition.accum_lengths = []
-
-            custom_record_transition.accum_rewards.append(finished_rewards)
-            custom_record_transition.accum_lengths.append(finished_lengths)
-
+            # Reset per-episode accumulators
             ep_rewards[dones] = 0.0
             ep_lengths[dones] = 0.0
+            ep_distance_traveled[dones] = 0.0
 
-        # Print every 500 timesteps only
         if timestep % 500 == 0:
-            accum_r = custom_record_transition.__dict__.get("accum_rewards", [])
-            accum_l = custom_record_transition.__dict__.get("accum_lengths", [])
+            d = custom_record_transition.__dict__
 
-            if accum_r:
-                all_r = torch.cat(accum_r)
-                all_l = torch.cat(accum_l)
+            print("\n" + "=" * 65)
+            print(f"  Timestep            : {timestep} / {timesteps}  ({100*timestep/timesteps:.1f}%)")
+            print(f"  Episodes finished   : {int(ep_count)}")
 
-                success_rate = env.extras.get(
-                    "success_rate", torch.tensor(0.0)
-                )
-                if hasattr(success_rate, "item"):
-                    success_rate = success_rate.item()
+            if d.get("accum_rewards"):
+                all_r    = torch.cat(d["accum_rewards"])
+                all_l    = torch.cat(d["accum_lengths"])
+                all_dist = torch.cat(d["accum_distances"])
+                all_to   = torch.cat(d["accum_timeouts"])
+                all_st   = torch.cat(d["accum_stagnations"])
 
-                print("\n" + "=" * 60)
-                print(f"  Timestep          : {timestep} / {timesteps}  ({100*timestep/timesteps:.1f}%)")
-                print(f"  Episodes finished : {int(ep_count)}")
-                print(f"  Mean Reward       : {all_r.mean().item():.4f}")
-                print(f"  Max  Reward       : {all_r.max().item():.4f}")
-                print(f"  Min  Reward       : {all_r.min().item():.4f}")
-                print(f"  Mean Ep Length    : {all_l.mean().item():.1f}")
-                print(f"  Min  Ep Length    : {all_l.min().item():.1f}")
-                print(f"  Success Rate      : {success_rate:.4f}")
-                print("=" * 60)
+                mean_ep_s       = all_l.mean().item() * env_cfg.sim.dt * env_cfg.decimation
+                mean_speed      = all_dist.mean().item() / (mean_ep_s + 1e-6)
+                timeout_rate    = all_to.mean().item()
+                stagnation_rate = all_st.mean().item()
 
-                # Clear accumulators for next window
-                custom_record_transition.accum_rewards = []
-                custom_record_transition.accum_lengths = []
+                print("-" * 65)
+                print(f"  Mean Reward         : {all_r.mean().item():.4f}   <- trend UP")
+                print(f"  Max  Reward         : {all_r.max().item():.4f}")
+                print(f"  Min  Reward         : {all_r.min().item():.4f}")
+                print("-" * 65)
+                print(f"  Mean Ep Duration    : {mean_ep_s:.1f} s")
+                print(f"  Mean Speed          : {mean_speed:.3f} m/s        <- trend toward 0.4+")
+
+                if d.get("accum_advances"):
+                    all_adv = torch.cat(d["accum_advances"])
+                    print(f"  Mean Carrot Advances: {all_adv.mean().item():.2f} / ep  <- trend UP")
+                    print(f"  Max  Carrot Advances: {all_adv.max().item():.0f} / ep")
+
+                print("-" * 65)
+                print(f"  Timeout Rate        : {timeout_rate:.2%}          <- want HIGH")
+                print(f"  Stagnation Rate     : {stagnation_rate:.2%}       <- want LOW")
+
+                if d.get("accum_advances"):
+                    all_adv = torch.cat(d["accum_advances"])
+                    print(f"  Mean Carrot Advances: {all_adv.mean().item():.2f} / ep")
+                    print(f"  Max  Carrot Advances: {all_adv.max().item():.0f} / ep")
+
+                # Add advance reason breakdown
+                if hasattr(env, "advance_reason"):
+                    total = sum(env.advance_reason.values()) + 1e-6
+                    print(f"  Advance reasons     : plane={env.advance_reason['plane']/total:.0%}"
+                        f" close={env.advance_reason['close']/total:.0%}"
+                        f" timeout={env.advance_reason['timeout']/total:.0%}")
+                    # Reset counters each print window
+                    env.advance_reason = {"plane": 0, "close": 0, "timeout": 0}
+
+                for key in ["accum_rewards", "accum_lengths", "accum_advances",
+                            "accum_distances", "accum_timeouts", "accum_stagnations"]:
+                    d[key] = []
+            else:
+                print("  No episodes finished yet in this window")
+
+            print("=" * 65)
 
     runner.agent.record_transition = custom_record_transition
     # ---- END BLOCK ----

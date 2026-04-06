@@ -5,7 +5,7 @@
 
 # import mdp
 from isaaclab.utils import configclass
-from ict_bot_nav.source.ict_bot_nav.tasks.a_navigation.ict_bot_navigation_env import CorridorEnvCfg
+from ict_bot_nav.source.ict_bot_nav.tasks.b_obstacle.ict_bot_obstacles_env import ObstacleEnvCfg
 
 ##
 # Scene definition
@@ -13,21 +13,21 @@ from ict_bot_nav.source.ict_bot_nav.tasks.a_navigation.ict_bot_navigation_env im
 
 
 @configclass
-class IctBotCorridorEnvCfg(CorridorEnvCfg):
+class IctBotObstacleEnvCfg(ObstacleEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
     # Action/Observation/State spaces
     action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 87 # [RelPos(3), Head(2), WheelVel(2), Lidar(72), IMU(6), LastAct(2)]
+    observation_space = 81 # [RelPos(3), Head(2), WheelVel(2), LastAct(2), Lidar(72)]
     state_space = 0
     
     # Physical properties
     wheel_radius = 0.1
     wheel_spacing = 0.16
-    max_linear_velocity = 1.0
-    max_angular_velocity = 1.5
+    max_linear_velocity = 0.5
+    max_angular_velocity = 6.25
     
     # Custom parameters/scales
     wheel_dof_name = [
@@ -39,14 +39,12 @@ class IctBotCorridorEnvCfg(CorridorEnvCfg):
 
 
 @configclass
-class IctBotCorridorEnvCfg_PLAY(IctBotCorridorEnvCfg):
+class IctBotObstacleEnvCfg_PLAY(IctBotObstacleEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
         # make a smaller scene for play
         self.scene.num_envs = 1
-
-        self.fixed_play_level = 1
 
         # disable randomization for play
         self.observations.policy.enable_corruption = False

@@ -13,22 +13,22 @@ from . import agents
 
 
 gym.register(
-    id="Ict-Bot-Corridor-v0",
-    entry_point=f"{__name__}.ict_bot_corridor_env:CorridorEnv",
+    id="Ict-Bot-Obstacle-v0",
+    entry_point=f"{__name__}.ict_bot_obstacles_env:ObstacleEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.ict_bot_corridor_env_cfg:IctBotCorridorEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.ict_bot_obstacles_env_cfg:IctBotObstacleEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
 
 
 gym.register(
-    id="Ict-Bot-Corridor-Play-v0",
-    entry_point=f"{__name__}.ict_bot_corridor_env:CorridorEnv",
+    id="Ict-Bot-Obstacle-Play-v0",
+    entry_point=f"{__name__}.ict_bot_obstacles_env:ObstacleEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.ict_bot_corridor_env_cfg:IctBotCorridorEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.ict_bot_obstacles_env_cfg:IctBotObstacleEnvCfg_PLAY",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     }
 )
