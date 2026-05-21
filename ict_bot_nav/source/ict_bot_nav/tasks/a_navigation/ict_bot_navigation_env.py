@@ -9,8 +9,11 @@ import torch
 from collections.abc import Sequence
 
 from ict_bot_nav.assets.markers.target_cone import TARGET_CONE_CFG
+from ict_bot_nav.assets.obstacles.object_obstacle import ObstacleSetCfg
+from ict_bot_nav.assets.obstacles.object_obstacle import CUBE_SMALL_CFG, CUBE_MEDIUM_CFG, CUBE_LARGE_CFG, CYLINDER_SMALL_CFG, CYLINDER_MEDIUM_CFG, CYLINDER_LARGE_CFG
 from ict_bot_nav.assets.robots.ict_bot import ICT_BOT_CFG
 from .carrot import place_carrot, update_carrot
+from .obstacle_manager import ObstacleManager
 import isaaclab.sim as sim_utils
 
 import os
@@ -30,6 +33,7 @@ from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
@@ -53,14 +57,23 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     )
 
     # corridor scene asset
-    scene = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/obstacles",
+    corridor = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/corridor",
         spawn=sim_utils.UsdFileCfg(
             usd_path=os.path.join(ICT_BOT_ASSETS_DIR, "scenes", "corridor.usd"),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
     )
+
+    # cube_obstacle     = CUBE_OBSTACLE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeObstacle")
+    # cylinder_obstacle = CYLINDER_OBSTACLE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderObstacle")
+    cube_small      = CUBE_SMALL_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeSmall")
+    cube_medium     = CUBE_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeMedium")
+    cube_large      = CUBE_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeLarge")
+    cylinder_small  = CYLINDER_SMALL_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderSmall")
+    cylinder_medium = CYLINDER_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderMedium")
+    cylinder_large  = CYLINDER_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderLarge")
 
     # robots
     robot: ArticulationCfg = ICT_BOT_CFG.replace(prim_path="/World/envs/env_.*/Robot")
@@ -77,11 +90,47 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
         offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.2)),
         mesh_prim_paths=[
             MultiMeshRayCasterCfg.RaycastTargetCfg(
-                prim_expr="{ENV_REGEX_NS}/obstacles", 
+                prim_expr="{ENV_REGEX_NS}/corridor", 
                 is_shared=True, 
                 merge_prim_meshes=True, 
                 track_mesh_transforms=False
-            )
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CubeSmall",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CylinderSmall",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CubeMedium",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CylinderMedium",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CubeLarge",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CylinderLarge",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
         ],
         pattern_cfg=patterns.LidarPatternCfg(
             channels=1, 
@@ -89,17 +138,8 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             horizontal_fov_range=(0.0, 360.0), 
             horizontal_res=5.0
         ),
-        max_distance=4.0,
+        max_distance=8.0,
         debug_vis=True,
-    )
-
-    # Contact sensors to detect the collision with the base of the robot
-    contact_sensor = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/link_base", # Matches all robot parts
-        update_period=0.0, # Update every physics step
-        history_length=3,
-        filter_prim_paths_expr=["{ENV_REGEX_NS}/obstacles"], # Only report contacts with obstacles
-        visualizer_cfg=True,
     )
 
 
@@ -115,7 +155,7 @@ class ActionsCfg:
     wheel_action: JointVelocityActionCfg = JointVelocityActionCfg(
         asset_name="robot",
         joint_names=["right_wheel_joint", "left_wheel_joint"],
-        scale=5.0,
+        scale=15.0,
     )
 
 
@@ -129,9 +169,9 @@ class ObservationsCfg:
 
         # Targeting (Essential for navigation)
         rel_target = ObsTerm(
-            func=mdp.rel_target_pos, 
+            func=mdp.rel_target_dist,
             params={"robot_cfg": SceneEntityCfg("robot")}
-        )   # [2]
+        )   # [1]
 
         heading = ObsTerm(
             func=mdp.heading_error, 
@@ -150,12 +190,16 @@ class ObservationsCfg:
 
         lidar_scan = ObsTerm(
             func=mdp.lidar_scan,
-            params={"num_beams": 72}
-        )   # [72] - 360° scan with 5° resolution, max distance 4m, kept zero for the navigation task
+            params={
+                "sensor_cfg": SceneEntityCfg("raycaster"), 
+                "num_beams": 72
+            }
+        )   # [144] — stacked lidar_t + lidar_t-1
 
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
+            # Total: rel_dist[1] + heading[2] + joint_vel[2] + last_action[2] + lidar[144] = 151
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
@@ -166,7 +210,7 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # --- POSITIVE MOTIVATION ---
-    
+
     progress = RewTerm(
         func=mdp.velocity_toward_target,
         weight=1.0,
@@ -175,8 +219,14 @@ class RewardsCfg:
 
     speed_bonus = RewTerm(
         func=mdp.reward_forward_speed,
-        weight=50.0,
+        weight=5.0,          
         params={"robot_cfg": SceneEntityCfg("robot")}
+    )
+
+    target_speed = RewTerm(
+        func=mdp.reward_target_speed,
+        weight=3.0,
+        params={"robot_cfg": SceneEntityCfg("robot"), "target_speed": 0.6}
     )
 
     heading = RewTerm(
@@ -193,6 +243,12 @@ class RewardsCfg:
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
+    proximity_penalty = RewTerm(
+        func=mdp.lidar_proximity_penalty,
+        weight=-2.0,
+        params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.5}
+    )
+
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-0.0001,
@@ -201,12 +257,7 @@ class RewardsCfg:
 
     action_rate = RewTerm(
         func=mdp.action_rate_l2,
-        weight=-0.5,
-    )
-
-    alive = RewTerm(
-        func=mdp.is_alive,
-        weight=-1.0,
+        weight=-0.05,
     )
 
 
@@ -220,25 +271,19 @@ class MyEventCfg():
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "pose_range": {
-                "x": (0.0, 0.0), 
-                "y": (-0.3, 0.3), 
-                "z": (0.1, 0.1),
-                "roll": (0.0, 0.0),
+                "x":     (0.0, 1.0),
+                "y":     (-0.3, 0.3),
+                "z":     (0.1, 0.1),
+                "roll":  (0.0, 0.0),
                 "pitch": (0.0, 0.0),
-                "yaw": (-3.1415, 3.1415),
+                "yaw":   (-0.5, 0.5),  # start narrow — roughly facing target
             },
-            "velocity_range": {}
+            "velocity_range": {
+                "linear":  {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
+                "angular": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
+            }
         },
     )
-
-    # reset_target_position = EventTerm(
-    #     func=mdp.reset_target_marker_location,
-    #     mode="reset",
-    #     params={
-    #         "min_distance": 1.0,
-    #         "max_distance": 2.5,
-    #     },
-    # )
 
     # randomize_wheel_friction = EventTerm(
     #     func=mdp.randomize_rigid_body_material,
@@ -280,6 +325,28 @@ class MyEventCfg():
 
 
 @configclass
+class CurriculumCfg:
+    # spawn_yaw = CurrTerm(
+    #     func=mdp.modify_env_param,
+    #     params={
+    #         "param_name": "pose_range.yaw",
+    #         "start_value": (-0.5, 0.5),      # ~±28° — mostly facing target
+    #         "end_value":   (-3.1415, 3.1415), # full random — any direction
+    #         "num_steps":   5,                 # 5 curriculum steps to full random
+    #     }
+    # )
+
+    obstacle_difficulty = CurrTerm(
+        func=mdp.obstacle_curriculum_term,
+        params={"cfg": mdp.ObstacleCurriculumCfg(
+            eval_window=200,
+            consecutive_windows_to_promote=2,
+            success_key="goal_reached",
+        )},
+    )
+
+
+@configclass
 class TerminationsCfg():
     """Termination terms for the MDP."""
 
@@ -290,10 +357,13 @@ class TerminationsCfg():
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
-    # reached_termination = DoneTerm(
-    #     func=mdp.target_reached_termination, 
-    #     params={"robot_cfg": SceneEntityCfg("robot")} 
-    # )
+    too_close = DoneTerm(
+        func=mdp.lidar_collision,
+        params={
+            "sensor_cfg": SceneEntityCfg("raycaster"),
+            "threshold": 0.25  # 0.25m in world units
+        }
+    )
 
 
 
@@ -312,10 +382,12 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     events: MyEventCfg = MyEventCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
 
+    wheel_dof_name: list[str] = ["right_wheel_joint", "left_wheel_joint"]
     target_marker_cfg = TARGET_CONE_CFG
 
     def __post_init__(self):
@@ -323,7 +395,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 5
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 25.0
+        self.episode_length_s = 20.0
         # simulation settings
         self.sim.dt = 1.0 / 100.0
 
@@ -341,16 +413,14 @@ class NavigationEnv(ManagerBasedRLEnv):
 
     def __init__(self, cfg: NavigationEnvCfg, render_mode: str | None = None, **kwargs):
         # Must initialize before super().__init__ — managers read these
-        self.target_pos = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
-        self.prev_tgt_dist = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.carrot_forward_dir = torch.zeros((cfg.scene.num_envs, 2), device=cfg.sim.device)
-        self.carrot_timer = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.carrot_advance_count = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.target_pos         = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
+        self.prev_tgt_dist      = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.episode_start_x    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.stagnation_timer   = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
 
         super().__init__(cfg, render_mode, **kwargs)
 
         # Post-init state
-        self.stagnation_timer = torch.zeros(self.num_envs, device=self.device)
         self.extras["log"] = {}
 
         # Wheel joints
@@ -360,25 +430,54 @@ class NavigationEnv(ManagerBasedRLEnv):
         # Visualization
         self.target_marker = VisualizationMarkers(self.cfg.target_marker_cfg)
 
+        self.obstacle_manager = ObstacleManager(
+            env=self,
+            assets=[
+                self.scene["cube_large"],
+                self.scene["cube_medium"],
+                self.scene["cube_small"],
+                self.scene["cylinder_large"],
+                self.scene["cylinder_medium"],
+                self.scene["cylinder_small"],
+            ],
+            cfg=ObstacleSetCfg(
+                max_obstacles=4,          # matches curriculum ceiling
+                shapes=[0, 1, 2, 3, 4, 5],
+                corridor_half_width=1.5,
+                spawn_radius=4.0,
+                min_obstacle_spacing=0.3,
+                max_speed=0.8,
+            ),
+        )
+
 
     def _reset_idx(self, env_ids: Sequence[int] | None) -> None:
-        super()._reset_idx(env_ids)
-
         if env_ids is None:
-            env_ids = torch.arange(self.num_envs, device=self.device)
+            env_ids = torch.arange(self.scene.num_envs, device=self.device)
         else:
             env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
 
-        # Reset carrot state for these envs
-        self.carrot_timer[env_ids] = 0.0
-        self.carrot_advance_count[env_ids] = 0.0  # reset counter at episode start
-        place_carrot(self, env_ids)
+        super()._reset_idx(env_ids)
 
-        # Reset stagnation
+        # Success signal for curriculum — robot traveled ≥ 4.0 m along X this episode
+        corridor_progress = (
+            self.scene["robot"].data.root_pos_w[env_ids, 0] - self.episode_start_x[env_ids]
+        )
+        self.extras.setdefault("episode", {})["goal_reached"] = (
+            corridor_progress >= 4.0
+        ).float()
+
+        # Reset episode tracking
+        self.episode_start_x[env_ids] = self.scene["robot"].data.root_pos_w[env_ids, 0]
+
+        if hasattr(self, "lidar_prev") and self.lidar_prev is not None:
+            self.lidar_prev[env_ids] = 0.0
+
+        place_carrot(self, env_ids)
+        self.obstacle_manager.reset(env_ids)
         self.stagnation_timer[env_ids] = 0.0
 
-        # Reset wheels
-        n = len(env_ids)
+        n  = len(env_ids)
         nw = len(self._wheel_indices)
         self.scene["robot"].write_joint_state_to_sim(
             torch.zeros((n, nw), device=self.device),
@@ -415,6 +514,8 @@ class NavigationEnv(ManagerBasedRLEnv):
             self.target_marker.visualize(self.target_pos)
         # -----------------------------------------------------
 
+        self.obstacle_manager.step()
+
         # post-step counters
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -426,10 +527,6 @@ class NavigationEnv(ManagerBasedRLEnv):
 
         # rewards — uses updated carrot position
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
-
-        if len(self.recorder_manager.active_terms) > 0:
-            self.obs_buf = self.observation_manager.compute()
-            self.recorder_manager.record_post_step()
 
         # reset terminated envs
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
@@ -447,6 +544,10 @@ class NavigationEnv(ManagerBasedRLEnv):
         # interval events
         if "interval" in self.event_manager.available_modes:
             self.event_manager.apply(mode="interval", dt=self.step_dt)
+
+        if len(self.recorder_manager.active_terms) > 0:
+            self.obs_buf = self.observation_manager.compute()
+            self.recorder_manager.record_post_step()
 
         # observations — after reset so reset envs get correct obs
         self.obs_buf = self.observation_manager.compute(update_history=True)

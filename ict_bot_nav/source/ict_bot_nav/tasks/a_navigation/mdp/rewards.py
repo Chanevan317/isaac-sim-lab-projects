@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import torch
 from isaaclab.utils.math import quat_inv, quat_apply
-from .observations import heading_error, rel_target_pos
+from .observations import heading_error, rel_target_pos, lidar_scan
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -18,24 +18,33 @@ def velocity_toward_target(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
 
     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
     vel_toward = (local_vel[:, :2] * target_dir).sum(dim=-1)
-    forward_speed = -local_vel[:, 1]
 
-    return torch.clamp(vel_toward, min=0.0) * torch.clamp(forward_speed, min=0.0)
+    return torch.clamp(vel_toward, min=0.0)
 
 
 def reward_forward_speed(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Squared velocity toward carrot — disproportionately rewards faster movement."""
+    """Linear forward speed in robot frame. Stable signal regardless of heading."""
     robot = env.scene[robot_cfg.name]
-    local_pos = rel_target_pos(env, robot_cfg)
-    current_dist = torch.norm(local_pos, dim=-1)
-    target_dir = local_pos / (current_dist.unsqueeze(-1) + 1e-6)
-
     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    vel_toward = (local_vel[:, :2] * target_dir).sum(dim=-1)
-    forward_speed = -local_vel[:, 1]
+    forward_speed = -local_vel[:, 1]  # -Y is forward
+    return torch.clamp(forward_speed, min=0.0)
 
-    base = torch.clamp(vel_toward, min=0.0) * torch.clamp(forward_speed, min=0.0)
-    return base ** 2
+
+def reward_target_speed(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg,
+                        target_speed: float = 0.6):
+    """Bonus for maintaining speed close to target_speed."""
+    robot = env.scene[robot_cfg.name]
+    local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
+    forward_speed = -local_vel[:, 1]
+    # Gaussian-shaped reward peaked at target_speed
+    return torch.exp(-((forward_speed - target_speed) ** 2) / 0.1)
+
+
+def reward_heading_alignment(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+    """Continuous reward for facing the carrot. Eliminates stop-to-correct behavior."""
+    h_error = heading_error(env, robot_cfg)
+    cos_angle = h_error[:, 1]
+    return torch.clamp(cos_angle, min=0.0)
 
 
 def penalize_backwards_movement(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
@@ -46,12 +55,12 @@ def penalize_backwards_movement(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCf
     return torch.clamp(-forward_speed, min=0.0)
 
 
-def reward_heading_alignment(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Continuous reward for facing the carrot. Eliminates stop-to-correct behavior."""
-    h_error = heading_error(env, robot_cfg)
-    cos_angle = h_error[:, 1]
-    return torch.clamp(cos_angle, min=0.0)
-
+def lidar_proximity_penalty(env, sensor_cfg, danger_dist=0.5):
+    # Normalised scan is already in [0,1], max_distance=4.0m
+    # danger_dist in normalised units = 0.5/4.0 = 0.125
+    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]  # current frame only
+    danger_zone = (scan < (danger_dist / 4.0)).float()
+    return -danger_zone.sum(dim=-1)  # count of beams in danger zone
 
 
 

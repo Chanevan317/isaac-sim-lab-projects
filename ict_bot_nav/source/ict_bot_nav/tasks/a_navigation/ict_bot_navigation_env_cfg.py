@@ -20,14 +20,14 @@ class IctBotNavigationEnvCfg(NavigationEnvCfg):
 
     # Action/Observation/State spaces
     action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 80 # [RelPos(2), Head(2), WheelVel(2), LastAct(2), Lidar(72)]
+    observation_space = 151  # [RelDist(1), Head(2), WheelVel(2), LastAct(2), Lidar_t(72), Lidar_t1(72)]
     state_space = 0
     
     # Physical properties
     wheel_radius = 0.1
     wheel_spacing = 0.16
-    max_linear_velocity = 0.5
-    max_angular_velocity = 6.25
+    max_linear_velocity = 1.0
+    max_angular_velocity = 10.0
     
     # Custom parameters/scales
     wheel_dof_name = [
@@ -48,3 +48,7 @@ class IctBotNavigationEnvCfg_PLAY(IctBotNavigationEnvCfg):
 
         # disable randomization for play
         self.observations.policy.enable_corruption = False
+
+        # Lock obstacles at a specific curriculum level for play
+        # 0=no obstacles, 1=2 static, 2=4 static, 3=4 slow, 4=6 moderate, 5=8 full
+        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 5
