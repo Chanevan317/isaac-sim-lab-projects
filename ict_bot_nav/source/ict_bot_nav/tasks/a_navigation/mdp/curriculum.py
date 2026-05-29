@@ -133,7 +133,13 @@ def obstacle_curriculum_term(
             if successes.ndim == 0:
                 env._obs_curr_successes.extend([successes.item()] * len(env_ids))
             else:
-                env._obs_curr_successes.extend(successes[env_ids].tolist())
+                if successes.ndim == 0:
+                    env._obs_curr_successes.extend([successes.item()] * len(env_ids))
+                elif successes.shape[0] == env.num_envs:
+                    env._obs_curr_successes.extend(successes[env_ids].tolist())
+                else:
+                    # Fallback: successes already sliced to env_ids length
+                    env._obs_curr_successes.extend(successes.tolist())
         else:
             env._obs_curr_successes.extend([float(successes)] * len(env_ids))
 

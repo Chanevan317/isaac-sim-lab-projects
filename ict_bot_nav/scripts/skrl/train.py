@@ -222,11 +222,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ---- TRAINING LOGS ----
     import torch
 
-    ep_rewards          = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
-    ep_lengths          = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
-    ep_distance_x       = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
-    ep_collisions       = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
-    ep_count            = 0
+    ep_rewards    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_lengths    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_distance_x = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
+    ep_count      = 0
 
     original_record_transition = runner.agent.record_transition
 
@@ -234,8 +233,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         states, actions, rewards, next_states,
         terminated, truncated, infos, timestep, timesteps
     ):
-        nonlocal ep_rewards, ep_lengths, ep_count
-        nonlocal ep_distance_x, ep_collisions
+        nonlocal ep_rewards, ep_lengths, ep_count, ep_distance_x
+
+        # Snapshot carrot pass count BEFORE original_record_transition
+        # because _reset_idx (called inside) resets carrot_pass_count
+        dones_pre = (terminated | truncated).squeeze(-1)
+        if dones_pre.any() and hasattr(env, "carrot_pass_count"):
+            carrot_snapshot = env.carrot_pass_count[dones_pre].clone()
+        else:
+            carrot_snapshot = None
 
         original_record_transition(
             states, actions, rewards, next_states,
@@ -245,15 +251,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         ep_rewards    += rewards.squeeze(-1)
         ep_lengths    += 1
 
-        # X corridor progress this step
         current_x      = env.scene["robot"].data.root_pos_w[:, 0]
-        ep_distance_x  = current_x - env.episode_start_x   # always positive if moving forward
+        ep_distance_x  = current_x - env.episode_start_x
 
-        # Collision terminations — terminated but not stagnation
-        # stagnation_termination fires terminated, time_out fires truncated
-        # so terminated = stagnation OR collision depending on which fired
-        # we disambiguate via the lidar_collision termination flag if accessible,
-        # otherwise use terminated as a proxy
         dones = (terminated | truncated).squeeze(-1)
 
         if dones.any():
@@ -264,7 +264,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     "distance_x":  [],
                     "timeouts":    [],
                     "stagnations": [],
-                    "collisions":  [],
+                    "carrots":     [],
                     "obs_level":   [],
                     "success":     [],
                 }
@@ -275,24 +275,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             done_lengths    = ep_lengths[dones].clone()
             done_distance_x = ep_distance_x[dones].clone()
             done_timeouts   = truncated.squeeze(-1)[dones].float()
-            done_stagnated  = terminated.squeeze(-1)[dones].float()
-
-            # Success: robot traveled at least 4.0 m along corridor X in episode
-            done_success = (done_distance_x >= 4.0).float()
-
-            # Curriculum level
-            obs_level = getattr(env, "_obs_curr_level", 0)
+            done_terminated  = terminated.squeeze(-1)[dones].float()
+            done_success    = (done_distance_x >= 4.0).float()
+            obs_level       = getattr(env, "_obs_curr_level", 0)
 
             buf["rewards"].append(done_rewards)
             buf["lengths"].append(done_lengths)
             buf["distance_x"].append(done_distance_x)
             buf["timeouts"].append(done_timeouts)
-            buf["stagnations"].append(done_stagnated)
+            buf["stagnations"].append(done_terminated)
             buf["success"].append(done_success)
             buf["obs_level"].append(
                 torch.full((dones.sum().item(),), obs_level,
                         dtype=torch.float32, device=env_cfg.sim.device)
             )
+
+            if carrot_snapshot is not None:
+                buf["carrots"].append(carrot_snapshot)
 
             ep_count              += dones.sum().item()
             ep_rewards[dones]      = 0.0
@@ -307,23 +306,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             print(f"  Episodes finished   : {int(ep_count)}")
 
             if buf.get("rewards"):
-                all_r      = torch.cat(buf["rewards"])
-                all_l      = torch.cat(buf["lengths"])
-                all_dx     = torch.cat(buf["distance_x"])
-                all_to     = torch.cat(buf["timeouts"])
-                all_st     = torch.cat(buf["stagnations"])
-                all_succ   = torch.cat(buf["success"])
-                all_level  = torch.cat(buf["obs_level"])
+                all_r     = torch.cat(buf["rewards"])
+                all_l     = torch.cat(buf["lengths"])
+                all_dx    = torch.cat(buf["distance_x"])
+                all_to    = torch.cat(buf["timeouts"])
+                all_st    = torch.cat(buf["stagnations"])
+                all_succ  = torch.cat(buf["success"])
+                all_level = torch.cat(buf["obs_level"])
 
                 step_dt     = env_cfg.sim.dt * env_cfg.decimation
                 mean_ep_s   = all_l.mean().item() * step_dt
                 mean_speed  = all_dx.mean().item() / (mean_ep_s + 1e-6)
                 success_rt  = all_succ.mean().item()
                 timeout_rt  = all_to.mean().item()
-                stagnate_rt = all_st.mean().item()
+                terminate_rt = all_st.mean().item()
                 curr_level  = int(all_level[-1].item())
 
-                # Curriculum schedule labels for readability
                 level_labels = {
                     0: "L0 — warm-up (0 obs)",
                     1: "L1 — 1 static",
@@ -343,28 +341,39 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print(f"  Max  X Progress     : {all_dx.max().item():>7.2f} m")
                 print(f"  Mean Speed (X/t)    : {mean_speed:>7.3f} m/s  ↑ toward 0.6+")
                 print("-" * 70)
-                print(f"  Success Rate        : {success_rt:>7.1%}   ↑ want > 70%")
-                print(f"  Timeout Rate        : {timeout_rt:>7.1%}   ↑ want high (not stagnating)")
-                print(f"  Stagnation Rate     : {stagnate_rt:>7.1%}   ↓ want low")
-                print("-" * 70)
-                print(f"  Curriculum Level    : {curr_level}  {level_labels.get(curr_level, '')}")
 
-                # Show level distribution if mixed
+                if buf.get("carrots") and len(buf["carrots"]) > 0:
+                    all_c = torch.cat(buf["carrots"])
+                    print(f"  Mean Carrots/ep     : {all_c.mean().item():>7.2f}   ↑ want rising")
+                    print(f"  Max  Carrots/ep     : {all_c.max().item():>7.0f}")
+                    print(f"  % eps ≥ 3 carrots   : "
+                        f"{(all_c >= 3).float().mean().item():>7.1%}  ↑ = curriculum success metric")
+
+                print("-" * 70)
+                print(f"  Success Rate        : {success_rt:>7.1%}   ↑ want > 70%")
+                print(f"  Timeout Rate        : {timeout_rt:>7.1%}   ↑ want high")
+                print(f"  Termination Rate    : {terminate_rt:>7.1%}   ↓ want low (collision + stagnation)")
+                print("-" * 70)
+                print(f"  Curriculum Level    : {curr_level}  "
+                    f"{level_labels.get(curr_level, '')}")
+
                 for lvl in range(6):
                     frac = (all_level == lvl).float().mean().item()
                     if frac > 0.0:
                         bar = "█" * int(frac * 20)
                         print(f"    L{lvl} episodes      : {frac:>5.1%}  {bar}")
 
-                # Warn if stagnation is dominating
-                if stagnate_rt > 0.5:
-                    print("  ⚠ stagnation > 50% — check reward weights or spawn range")
+                if terminate_rt > 0.5:
+                    print("  ⚠ termination > 50% — robot dying too often, check reward weights")
                 if success_rt < 0.1 and curr_level > 0:
                     print("  ⚠ success < 10% at non-zero level — curriculum may need demotion")
                 if mean_speed < 0.2:
-                    print("  ⚠ mean speed < 0.2 m/s — policy may be learning to stand still")
+                    print("  ⚠ mean speed < 0.2 m/s — policy may be standing still")
+                if buf.get("carrots") and len(buf["carrots"]) > 0:
+                    all_c = torch.cat(buf["carrots"])
+                    if all_c.mean().item() < 1.0 and curr_level == 0:
+                        print("  ⚠ mean carrots < 1 at L0 — robot not reaching carrot at all")
 
-                # Clear buffers
                 for key in buf:
                     buf[key] = []
 

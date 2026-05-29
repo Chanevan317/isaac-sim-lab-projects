@@ -66,8 +66,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    # cube_obstacle     = CUBE_OBSTACLE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeObstacle")
-    # cylinder_obstacle = CYLINDER_OBSTACLE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderObstacle")
+    # corridor and obstacle assets
     cube_small      = CUBE_SMALL_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeSmall")
     cube_medium     = CUBE_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeMedium")
     cube_large      = CUBE_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeLarge")
@@ -75,7 +74,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     cylinder_medium = CYLINDER_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderMedium")
     cylinder_large  = CYLINDER_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderLarge")
 
-    # robots
+    # robot
     robot: ArticulationCfg = ICT_BOT_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     # lights
@@ -88,6 +87,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     raycaster = MultiMeshRayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/link_base",
         offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.2)),
+        ray_alignment="yaw",
         mesh_prim_paths=[
             MultiMeshRayCasterCfg.RaycastTargetCfg(
                 prim_expr="{ENV_REGEX_NS}/corridor", 
@@ -140,6 +140,22 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
         ),
         max_distance=8.0,
         debug_vis=True,
+    )
+
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/link_base",
+        update_period=0.0,
+        history_length=3,
+        filter_prim_paths_expr=[
+            "{ENV_REGEX_NS}/corridor",   
+            "{ENV_REGEX_NS}/CubeSmall",
+            "{ENV_REGEX_NS}/CubeMedium",
+            "{ENV_REGEX_NS}/CubeLarge",
+            "{ENV_REGEX_NS}/CylinderSmall",
+            "{ENV_REGEX_NS}/CylinderMedium",
+            "{ENV_REGEX_NS}/CylinderLarge",
+        ], 
+        visualizer_cfg=True,
     )
 
 
@@ -211,53 +227,40 @@ class RewardsCfg:
 
     # --- POSITIVE MOTIVATION ---
 
-    progress = RewTerm(
-        func=mdp.velocity_toward_target,
+    velocity_toward_carrot = RewTerm(
+        func=mdp.reward_velocity_toward_carrot,
         weight=1.0,
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
-    speed_bonus = RewTerm(
-        func=mdp.reward_forward_speed,
-        weight=5.0,          
-        params={"robot_cfg": SceneEntityCfg("robot")}
-    )
-
-    target_speed = RewTerm(
-        func=mdp.reward_target_speed,
-        weight=3.0,
-        params={"robot_cfg": SceneEntityCfg("robot"), "target_speed": 0.6}
-    )
-
-    heading = RewTerm(
-        func=mdp.reward_heading_alignment,
-        weight=2.0,
-        params={"robot_cfg": SceneEntityCfg("robot")}
+    carrot_pass = RewTerm(
+        func=mdp.reward_carrot_pass,
+        weight=5.0,             # large sparse bonus — clear peak signal for PPO
+        params={}
     )
 
     # --- NEGATIVE CONSTRAINTS ---
 
-    backward = RewTerm(
-        func=mdp.penalize_backwards_movement,
-        weight=-5.0,
-        params={"robot_cfg": SceneEntityCfg("robot")}
-    )
-
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-2.0,
-        params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.5}
+        weight=-0.2,
+        params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.3}
     )
 
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-0.0001,
-        params={"asset_cfg": SceneEntityCfg("robot")}
+    termination_penalty = RewTerm(
+        func=mdp.is_terminated,   # built-in Isaac Lab term, fires -1 on termination step
+        weight=-1.0,
     )
 
     action_rate = RewTerm(
         func=mdp.action_rate_l2,
-        weight=-0.05,
+        weight=-0.01,
+    )
+
+    joint_vel = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-0.001,   # small — just enough to break the stationary optimum
+        params={"asset_cfg": SceneEntityCfg("robot")}
     )
 
 
@@ -272,11 +275,11 @@ class MyEventCfg():
             "asset_cfg": SceneEntityCfg("robot"),
             "pose_range": {
                 "x":     (0.0, 1.0),
-                "y":     (-0.3, 0.3),
+                "y":     (-0.5, 0.5),
                 "z":     (0.1, 0.1),
                 "roll":  (0.0, 0.0),
                 "pitch": (0.0, 0.0),
-                "yaw":   (-0.5, 0.5),  # start narrow — roughly facing target
+                "yaw":   (1.0, 2.14),
             },
             "velocity_range": {
                 "linear":  {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
@@ -357,11 +360,29 @@ class TerminationsCfg():
         params={"robot_cfg": SceneEntityCfg("robot")}
     )
 
-    too_close = DoneTerm(
-        func=mdp.lidar_collision,
+    # too_close = DoneTerm(
+    #     func=mdp.lidar_collision,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("raycaster"),
+    #         "threshold": 0.25  # 0.25m in world units
+    #     }
+    # )
+
+    # tipping = DoneTerm(
+    #     func=mdp.tipping_termination,
+    #     params={
+    #         "robot_cfg": SceneEntityCfg("robot"),
+    #         "max_pitch_deg": 20.0,
+    #         "max_roll_deg":  20.0,
+    #     }
+    # )
+
+    # Terminate if the robot touches anything with a force > 1.0 N
+    collision_termination = DoneTerm(
+        func=mdp.illegal_contact,
         params={
-            "sensor_cfg": SceneEntityCfg("raycaster"),
-            "threshold": 0.25  # 0.25m in world units
+            "sensor_cfg": SceneEntityCfg("contact_sensor"), 
+            "threshold": 1.0 # Force in Newtons
         }
     )
 
@@ -413,12 +434,17 @@ class NavigationEnv(ManagerBasedRLEnv):
 
     def __init__(self, cfg: NavigationEnvCfg, render_mode: str | None = None, **kwargs):
         # Must initialize before super().__init__ — managers read these
-        self.target_pos         = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
-        self.prev_tgt_dist      = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.episode_start_x    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.stagnation_timer   = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.target_pos       = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
+        self.prev_tgt_dist    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.episode_start_x  = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.stagnation_timer = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.carrot_pass_count = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
 
         super().__init__(cfg, render_mode, **kwargs)
+
+        self.extras.setdefault("episode", {})["goal_reached"] = torch.zeros(
+            self.num_envs, device=self.device
+        )
 
         # Post-init state
         self.extras["log"] = {}
@@ -453,29 +479,33 @@ class NavigationEnv(ManagerBasedRLEnv):
 
     def _reset_idx(self, env_ids: Sequence[int] | None) -> None:
         if env_ids is None:
-            env_ids = torch.arange(self.scene.num_envs, device=self.device)
+            env_ids = torch.arange(self.num_envs, device=self.device)
         else:
             env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
 
         super()._reset_idx(env_ids)
 
-        # Success signal for curriculum — robot traveled ≥ 4.0 m along X this episode
-        corridor_progress = (
-            self.scene["robot"].data.root_pos_w[env_ids, 0] - self.episode_start_x[env_ids]
-        )
-        self.extras.setdefault("episode", {})["goal_reached"] = (
-            corridor_progress >= 4.0
+        self.stagnation_timer[env_ids] = 0.0
+
+        # Success signal for curriculum — robot passed >= 3 carrots this episode
+        self.extras["episode"]["goal_reached"][env_ids] = (
+            self.carrot_pass_count[env_ids] >= 3.0
         ).float()
 
-        # Reset episode tracking
+        # Log pass count for training monitor before reset
+        # (training.py reads this before _reset_idx via snapshot — see below)
+
         self.episode_start_x[env_ids] = self.scene["robot"].data.root_pos_w[env_ids, 0]
 
         if hasattr(self, "lidar_prev") and self.lidar_prev is not None:
             self.lidar_prev[env_ids] = 0.0
 
-        place_carrot(self, env_ids)
+        place_carrot(self, env_ids)   # resets carrot_pass_count[env_ids] to 0.0
+
+        if hasattr(self, "_prev_carrot_pass_count"):
+            self._prev_carrot_pass_count[env_ids] = 0.0
+
         self.obstacle_manager.reset(env_ids)
-        self.stagnation_timer[env_ids] = 0.0
 
         n  = len(env_ids)
         nw = len(self._wheel_indices)

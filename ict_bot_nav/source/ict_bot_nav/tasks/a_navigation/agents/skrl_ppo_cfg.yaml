@@ -40,7 +40,7 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 64
+  rollouts: 32
   learning_epochs: 8
   mini_batches: 8
   discount_factor: 0.99
@@ -62,7 +62,7 @@ agent:
   entropy_loss_scale: 0.005
   value_loss_scale: 2.0
   kl_threshold: 0.0
-  rewards_shaper_scale: 0.01
+  rewards_shaper_scale: 1.0
   time_limit_bootstrap: True
   # logging and checkpoint
   experiment:
@@ -76,5 +76,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 1000000
+  timesteps: 1500000
   environment_info: log

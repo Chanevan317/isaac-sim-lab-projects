@@ -2,146 +2,63 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import torch
 from isaaclab.utils.math import quat_inv, quat_apply
-from .observations import heading_error, rel_target_pos, lidar_scan
+from ict_bot_nav.tasks.a_navigation.carrot import REACH_THRESHOLD 
+from .observations import heading_error, rel_target_dist, lidar_scan
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from isaaclab.managers import SceneEntityCfg
 
 
-def velocity_toward_target(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Velocity component toward carrot, only when moving forward."""
+# --- POSITIVE ---
+
+def reward_velocity_toward_carrot(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+) -> torch.Tensor:
     robot = env.scene[robot_cfg.name]
-    local_pos = rel_target_pos(env, robot_cfg)          # [N, 2]
-    current_dist = torch.norm(local_pos, dim=-1)        # [N]
-    target_dir = local_pos / (current_dist.unsqueeze(-1) + 1e-6)  # [N, 2]
 
-    local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    vel_toward = (local_vel[:, :2] * target_dir).sum(dim=-1)
+    to_carrot = env.target_pos[:, :2] - robot.data.root_pos_w[:, :2]
+    dist = torch.norm(to_carrot, dim=-1, keepdim=True).clamp(min=1e-6)
+    to_carrot_unit = to_carrot / dist
 
-    return torch.clamp(vel_toward, min=0.0)
+    vel_xy = robot.data.root_lin_vel_w[:, :2]
+    vel_toward = (vel_xy * to_carrot_unit).sum(dim=-1)
 
+    forward_local = torch.zeros_like(robot.data.root_pos_w)
+    forward_local[:, 1] = -1.0
+    forward_world = quat_apply(robot.data.root_quat_w, forward_local)
+    cos_heading = (forward_world[:, :2] * to_carrot_unit).sum(dim=-1)
 
-def reward_forward_speed(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Linear forward speed in robot frame. Stable signal regardless of heading."""
-    robot = env.scene[robot_cfg.name]
-    local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    forward_speed = -local_vel[:, 1]  # -Y is forward
-    return torch.clamp(forward_speed, min=0.0)
-
-
-def reward_target_speed(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg,
-                        target_speed: float = 0.6):
-    """Bonus for maintaining speed close to target_speed."""
-    robot = env.scene[robot_cfg.name]
-    local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    forward_speed = -local_vel[:, 1]
-    # Gaussian-shaped reward peaked at target_speed
-    return torch.exp(-((forward_speed - target_speed) ** 2) / 0.1)
+    # Scale vel to [0, 10] range before multiplying
+    # max_speed ≈ 0.5 m/s → normalise then amplify
+    max_speed = 0.5
+    vel_normalised = vel_toward / max_speed          # [-1, 1]
+    
+    c = 0.1
+    return (vel_normalised * cos_heading - c) * 10.0
 
 
-def reward_heading_alignment(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Continuous reward for facing the carrot. Eliminates stop-to-correct behavior."""
-    h_error = heading_error(env, robot_cfg)
-    cos_angle = h_error[:, 1]
-    return torch.clamp(cos_angle, min=0.0)
-
-
-def penalize_backwards_movement(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-    """Penalizes backward movement regardless of direction to carrot."""
-    robot = env.scene[robot_cfg.name]
-    local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-    forward_speed = -local_vel[:, 1]
-    return torch.clamp(-forward_speed, min=0.0)
-
-
-def lidar_proximity_penalty(env, sensor_cfg, danger_dist=0.5):
-    # Normalised scan is already in [0,1], max_distance=4.0m
-    # danger_dist in normalised units = 0.5/4.0 = 0.125
-    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]  # current frame only
-    danger_zone = (scan < (danger_dist / 4.0)).float()
-    return -danger_zone.sum(dim=-1)  # count of beams in danger zone
+def reward_carrot_pass(env):
+    """Sparse bonus, fires once per carrot reached."""
+    if not hasattr(env, "_prev_carrot_pass_count"):
+        env._prev_carrot_pass_count = env.carrot_pass_count.clone()
+    delta = env.carrot_pass_count - env._prev_carrot_pass_count
+    env._prev_carrot_pass_count = env.carrot_pass_count.clone()
+    return torch.clamp(delta, min=0.0)
 
 
 
+# --- NEGATIVE ---
 
+def lidar_proximity_penalty(env, sensor_cfg, danger_dist=0.4):
+    """
+    Soft proximity penalty using lidar_scan observation.
+    Uses current frame only [:, :72].
+    danger_dist in metres — converted to normalised units with max_range=4.0
+    """
+    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]
+    threshold = danger_dist / 4.0                           # normalised
+    danger_beams = (scan < threshold).float()
+    return torch.clamp(danger_beams.sum(dim=-1), max=8.0)   # cap at 8 beams
 
-
-
-
-
-
-
-
-
-
-
-
-# def velocity_toward_target(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Velocity toward target BUT only when robot is facing the target.
-#     Rewards forward driving toward goal. Does not reward backing in."""
-#     robot = env.scene[robot_cfg.name]
-#     local_pos = rel_target_pos(env, robot_cfg)
-#     current_dist = torch.norm(local_pos, dim=-1)
-
-#     target_dir = local_pos / (current_dist.unsqueeze(-1) + 1e-6)
-#     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-
-#     # Velocity component toward target
-#     vel_toward = (local_vel[:, :2] * target_dir[:, :2]).sum(dim=-1)
-
-#     # Forward speed in local frame — negative Y is forward for this robot
-#     forward_speed = -local_vel[:, 1]
-
-#     # Only reward if BOTH conditions are true:
-#     # 1. velocity is toward the target (dot product positive)
-#     # 2. robot is moving forward (not reversing)
-#     # This blocks the backward-toward-target cheat
-#     active = (current_dist > 0.12).float()
-#     reward = torch.clamp(vel_toward, min=0.0) * torch.clamp(forward_speed, min=0.0) * active
-
-#     return reward
-
-
-# def reward_forward_speed(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Squared version of velocity_toward_target for speed incentive."""
-#     robot = env.scene[robot_cfg.name]
-#     local_pos = rel_target_pos(env, robot_cfg)
-#     current_dist = torch.norm(local_pos, dim=-1)
-
-#     target_dir = local_pos / (current_dist.unsqueeze(-1) + 1e-6)
-#     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-
-#     vel_toward = (local_vel[:, :2] * target_dir[:, :2]).sum(dim=-1)
-#     forward_speed = -local_vel[:, 1]
-
-#     active = (current_dist > 0.12).float()
-#     base = torch.clamp(vel_toward, min=0.0) * torch.clamp(forward_speed, min=0.0) * active
-
-#     return base ** 2
-
-
-# def penalize_backwards_movement(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Penalizes any backward movement regardless of direction to target."""
-#     robot = env.scene[robot_cfg.name]
-#     local_vel = quat_apply(quat_inv(robot.data.root_quat_w), robot.data.root_lin_vel_w)
-#     forward_speed = -local_vel[:, 1]  # negative Y is forward
-#     # Return magnitude of backward movement — weight handles sign
-#     return torch.clamp(-forward_speed, min=0.0)
-
-
-# def target_reached_reward(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Returns 1.0 on success. Weight is the prize."""
-#     reached = check_target_reached(env, robot_cfg)
-
-#     if env.reset_buf.any():
-#         successes = reached[env.reset_buf].float().mean()
-#         env.extras["success_rate"] = (
-#             0.98 * env.extras.get("success_rate", torch.tensor(0.0, device=env.device))
-#             + 0.02 * successes
-#         )
-#         # This key appears automatically in Tensorboard via Isaac Lab's logger
-#         env.extras["log"] = env.extras.get("log", {})
-#         env.extras["log"]["success_rate"] = env.extras["success_rate"].item()
-
-#     return reached.float()

@@ -45,9 +45,9 @@ ICT_BOT_CFG = ArticulationCfg(
         "wheels": ImplicitActuatorCfg(
             joint_names_expr=["right_wheel_joint", "left_wheel_joint"],
             effort_limit_sim=20.0,
-            velocity_limit_sim=12.0,
+            velocity_limit_sim=15.0,
             stiffness=0.0,
-            damping=10.0,
+            damping=5.0,
         ),
     }
 )

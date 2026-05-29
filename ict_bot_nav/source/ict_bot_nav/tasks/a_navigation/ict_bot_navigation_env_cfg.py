@@ -51,4 +51,4 @@ class IctBotNavigationEnvCfg_PLAY(IctBotNavigationEnvCfg):
 
         # Lock obstacles at a specific curriculum level for play
         # 0=no obstacles, 1=2 static, 2=4 static, 3=4 slow, 4=6 moderate, 5=8 full
-        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 5
+        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 0
