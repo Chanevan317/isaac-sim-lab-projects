@@ -53,7 +53,15 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     # world
     ground_plane = AssetBaseCfg(
         prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(),
+        spawn=sim_utils.GroundPlaneCfg(
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                static_friction=1.0,
+                dynamic_friction=1.0,
+                restitution=0.0,
+                friction_combine_mode="max",
+            ),
+            color=(0.5, 0.5, 1.0), # Set color as (R, G, B) between 0.0 and 1.0 
+        ),
     )
 
     # corridor scene asset
@@ -235,7 +243,7 @@ class RewardsCfg:
 
     carrot_pass = RewTerm(
         func=mdp.reward_carrot_pass,
-        weight=5.0,             # large sparse bonus — clear peak signal for PPO
+        weight=12.0,             # large sparse bonus — clear peak signal for PPO
         params={}
     )
 
@@ -243,25 +251,19 @@ class RewardsCfg:
 
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-0.2,
+        weight=-0.05,
         params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.3}
     )
 
     termination_penalty = RewTerm(
         func=mdp.is_terminated,   # built-in Isaac Lab term, fires -1 on termination step
-        weight=-1.0,
+        weight=-10.0,
     )
 
-    action_rate = RewTerm(
-        func=mdp.action_rate_l2,
-        weight=-0.01,
-    )
-
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-0.001,   # small — just enough to break the stationary optimum
-        params={"asset_cfg": SceneEntityCfg("robot")}
-    )
+    # action_rate = RewTerm(
+    #     func=mdp.action_rate_l2,
+    #     weight=-0.01,
+    # )
 
 
 @configclass
@@ -342,7 +344,7 @@ class CurriculumCfg:
     obstacle_difficulty = CurrTerm(
         func=mdp.obstacle_curriculum_term,
         params={"cfg": mdp.ObstacleCurriculumCfg(
-            eval_window=200,
+            eval_window=1000,
             consecutive_windows_to_promote=2,
             success_key="goal_reached",
         )},
@@ -355,10 +357,10 @@ class TerminationsCfg():
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    no_progress = DoneTerm(
-        func=mdp.stagnation_termination,
-        params={"robot_cfg": SceneEntityCfg("robot")}
-    )
+    # no_progress = DoneTerm(
+    #     func=mdp.stagnation_termination,
+    #     params={"robot_cfg": SceneEntityCfg("robot")}
+    # )
 
     # too_close = DoneTerm(
     #     func=mdp.lidar_collision,
@@ -398,7 +400,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for ict bot."""
 
     # Scene settings
-    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=4096, env_spacing=20.0)
+    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=25.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

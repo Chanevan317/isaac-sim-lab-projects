@@ -226,6 +226,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     ep_lengths    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_distance_x = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_count      = 0
+    ep_level_counts = torch.zeros(6, device=env_cfg.sim.device)
 
     original_record_transition = runner.agent.record_transition
 
@@ -235,24 +236,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     ):
         nonlocal ep_rewards, ep_lengths, ep_count, ep_distance_x
 
-        # Snapshot carrot pass count BEFORE original_record_transition
-        # because _reset_idx (called inside) resets carrot_pass_count
         dones_pre = (terminated | truncated).squeeze(-1)
-        if dones_pre.any() and hasattr(env, "carrot_pass_count"):
-            carrot_snapshot = env.carrot_pass_count[dones_pre].clone()
+        
+        # Snapshot EVERYTHING before original_record_transition resets env state
+        if dones_pre.any():
+            carrot_snapshot = env.carrot_pass_count[dones_pre].clone() \
+                if hasattr(env, "carrot_pass_count") else None
+            
+            # Snapshot X progress BEFORE _reset_idx updates episode_start_x
+            current_x_snapshot = env.scene["robot"].data.root_pos_w[dones_pre, 0].clone()
+            start_x_snapshot   = env.episode_start_x[dones_pre].clone()
+            distance_snapshot  = current_x_snapshot - start_x_snapshot
+            
+            timeout_snapshot    = truncated.squeeze(-1)[dones_pre].float().clone()
+            terminated_snapshot = terminated.squeeze(-1)[dones_pre].float().clone()
         else:
-            carrot_snapshot = None
+            carrot_snapshot    = None
+            distance_snapshot  = None
+            timeout_snapshot   = None
+            terminated_snapshot = None
 
         original_record_transition(
             states, actions, rewards, next_states,
             terminated, truncated, infos, timestep, timesteps
         )
 
-        ep_rewards    += rewards.squeeze(-1)
-        ep_lengths    += 1
-
-        current_x      = env.scene["robot"].data.root_pos_w[:, 0]
-        ep_distance_x  = current_x - env.episode_start_x
+        ep_rewards += rewards.squeeze(-1)
+        ep_lengths += 1
 
         dones = (terminated | truncated).squeeze(-1)
 
@@ -273,18 +283,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             done_rewards    = ep_rewards[dones].clone()
             done_lengths    = ep_lengths[dones].clone()
-            done_distance_x = ep_distance_x[dones].clone()
-            done_timeouts   = truncated.squeeze(-1)[dones].float()
-            done_terminated  = terminated.squeeze(-1)[dones].float()
-            done_success    = (done_distance_x >= 4.0).float()
             obs_level       = getattr(env, "_obs_curr_level", 0)
 
             buf["rewards"].append(done_rewards)
             buf["lengths"].append(done_lengths)
-            buf["distance_x"].append(done_distance_x)
-            buf["timeouts"].append(done_timeouts)
-            buf["stagnations"].append(done_terminated)
-            buf["success"].append(done_success)
+            buf["distance_x"].append(distance_snapshot)
+            buf["timeouts"].append(timeout_snapshot)
+            buf["stagnations"].append(terminated_snapshot)
+            buf["success"].append((distance_snapshot >= 4.0).float())
             buf["obs_level"].append(
                 torch.full((dones.sum().item(),), obs_level,
                         dtype=torch.float32, device=env_cfg.sim.device)
@@ -293,9 +299,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             if carrot_snapshot is not None:
                 buf["carrots"].append(carrot_snapshot)
 
-            ep_count              += dones.sum().item()
-            ep_rewards[dones]      = 0.0
-            ep_lengths[dones]      = 0.0
+            ep_count          += dones.sum().item()
+            ep_rewards[dones]  = 0.0
+            ep_lengths[dones]  = 0.0
+            ep_level_counts[obs_level] += dones.sum().item()
 
         if timestep % 500 == 0:
             buf = getattr(custom_record_transition, "_buf", {})
@@ -321,6 +328,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 timeout_rt  = all_to.mean().item()
                 terminate_rt = all_st.mean().item()
                 curr_level  = int(all_level[-1].item())
+                curr_event = getattr(env, "_obs_curr_last_event", "none")
+                curr_sr    = getattr(env, "_obs_curr_successes", [])
+                curr_sr_val = (sum(curr_sr[-2000:]) / len(curr_sr[-2000:])) if len(curr_sr) >= 200 else 0.0
 
                 level_labels = {
                     0: "L0 — warm-up (0 obs)",
@@ -339,7 +349,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print(f"  Mean Ep Duration    : {mean_ep_s:>7.1f} s")
                 print(f"  Mean X Progress     : {all_dx.mean().item():>7.2f} m   ↑ want rising")
                 print(f"  Max  X Progress     : {all_dx.max().item():>7.2f} m")
-                print(f"  Mean Speed (X/t)    : {mean_speed:>7.3f} m/s  ↑ toward 0.6+")
+                print(f"  Mean Speed (X/t)    : {mean_speed:>7.3f} m/s  ↑ toward 0.5")
                 print("-" * 70)
 
                 if buf.get("carrots") and len(buf["carrots"]) > 0:
@@ -352,17 +362,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print("-" * 70)
                 print(f"  Success Rate        : {success_rt:>7.1%}   ↑ want > 70%")
                 print(f"  Timeout Rate        : {timeout_rt:>7.1%}   ↑ want high")
-                print(f"  Termination Rate    : {terminate_rt:>7.1%}   ↓ want low (collision + stagnation)")
+                print(f"  Termination Rate    : {terminate_rt:>7.1%}   ↓ want low (collision)")
                 print("-" * 70)
-                print(f"  Curriculum Level    : {curr_level}  "
-                    f"{level_labels.get(curr_level, '')}")
-
+                print("-" * 70)
+                print(f"  Curriculum Level    : {curr_level}  {level_labels.get(curr_level, '')}")
+                print(f"  Curriculum SR       : {curr_sr_val:>7.1%}  (rolling 2000 eps)")
+                print(f"  Last Event          : {curr_event}")
+                print("-" * 70)
+                print("  Level distribution  :")
                 for lvl in range(6):
-                    frac = (all_level == lvl).float().mean().item()
-                    if frac > 0.0:
-                        bar = "█" * int(frac * 20)
-                        print(f"    L{lvl} episodes      : {frac:>5.1%}  {bar}")
+                    frac = (ep_level_counts[lvl] / ep_level_counts.sum().clamp(min=1)).item()
+                    bar  = "█" * int(frac * 20) if frac > 0.0 else ""
+                    active = " ◄" if lvl == curr_level else ""
+                    print(f"    L{lvl} {level_labels.get(lvl, ''):22s}: {frac:>5.1%}  {bar}{active}")
 
+                print("-" * 70)
                 if terminate_rt > 0.5:
                     print("  ⚠ termination > 50% — robot dying too often, check reward weights")
                 if success_rt < 0.1 and curr_level > 0:

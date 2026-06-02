@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import torch
-from isaaclab.utils.math import quat_inv, quat_apply
-from ict_bot_nav.tasks.a_navigation.carrot import REACH_THRESHOLD 
-from .observations import heading_error, rel_target_dist, lidar_scan
+from isaaclab.utils.math import quat_apply
+from .observations import lidar_scan
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -23,6 +22,9 @@ def reward_velocity_toward_carrot(
     to_carrot_unit = to_carrot / dist
 
     vel_xy = robot.data.root_lin_vel_w[:, :2]
+    # print(f"vel_xy[0]: {vel_xy[0]}")
+    # print(f"root_pos[0]: {robot.data.root_pos_w[0]}")
+    # print(f"target_pos[0]: {env.target_pos[0]}")
     vel_toward = (vel_xy * to_carrot_unit).sum(dim=-1)
 
     forward_local = torch.zeros_like(robot.data.root_pos_w)
@@ -35,11 +37,11 @@ def reward_velocity_toward_carrot(
     max_speed = 0.5
     vel_normalised = vel_toward / max_speed          # [-1, 1]
     
-    c = 0.1
+    c = 0.05
     return (vel_normalised * cos_heading - c) * 10.0
 
 
-def reward_carrot_pass(env):
+def reward_carrot_pass(env: ManagerBasedRLEnv):
     """Sparse bonus, fires once per carrot reached."""
     if not hasattr(env, "_prev_carrot_pass_count"):
         env._prev_carrot_pass_count = env.carrot_pass_count.clone()
@@ -51,14 +53,14 @@ def reward_carrot_pass(env):
 
 # --- NEGATIVE ---
 
-def lidar_proximity_penalty(env, sensor_cfg, danger_dist=0.4):
+def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, danger_dist=0.3):
     """
     Soft proximity penalty using lidar_scan observation.
     Uses current frame only [:, :72].
-    danger_dist in metres — converted to normalised units with max_range=4.0
+    danger_dist in metres — converted to normalised units with max_range=8.0
     """
     scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]
-    threshold = danger_dist / 4.0                           # normalised
+    threshold = danger_dist / 8.0                           # normalised
     danger_beams = (scan < threshold).float()
     return torch.clamp(danger_beams.sum(dim=-1), max=8.0)   # cap at 8 beams
 
