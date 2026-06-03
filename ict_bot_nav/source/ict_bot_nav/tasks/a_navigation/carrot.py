@@ -4,6 +4,7 @@ import torch
 LOOKAHEAD_DIST  = 1.5   # metres — matches Nav2 at 0.5 m/s, lookahead_time=1.5s
 ADVANCE_OFFSET  = 0.25   # metres ahead of carrot — robot centre fully past before advance
 MARKER_HEIGHT   = 0.25   # metres
+LINE_HALF_WIDTH  = 1.0   # ±1m from centreline = 2m total valid line
 
 def place_carrot(env, env_ids: torch.Tensor) -> None:
     if env_ids.dtype == torch.bool:
@@ -36,10 +37,15 @@ def update_carrot(env) -> None:
         env.target_pos[:, :2] - robot_pos[:, :2], dim=-1
     )
 
-    # Line threshold — robot X must pass carrot X + ADVANCE_OFFSET
-    # Works for straight corridor; when turns are added, replace with
-    # segment projection using next_waypoint direction
-    reached = robot_pos[:, 0] >= (env.target_pos[:, 0] - ADVANCE_OFFSET)
+    # Line crossing — robot must pass carrot X
+    crossed_line = robot_pos[:, 0] >= (env.target_pos[:, 0] - ADVANCE_OFFSET)
+
+    # Must be within ±LINE_HALF_WIDTH of corridor centreline
+    within_line = torch.abs(
+        robot_pos[:, 1] - env_origins[:, 1]
+    ) <= LINE_HALF_WIDTH
+
+    reached = crossed_line & within_line
 
     env.carrot_pass_count += reached.float()
 

@@ -193,12 +193,12 @@ class ObservationsCfg:
 
         # Targeting (Essential for navigation)
         rel_target = ObsTerm(
-            func=mdp.rel_target_dist,
+            func=mdp.rel_line_dist,
             params={"robot_cfg": SceneEntityCfg("robot")}
-        )   # [1]
+        )   # [2]
 
         heading = ObsTerm(
-            func=mdp.heading_error, 
+            func=mdp.heading_to_line, 
             params={"robot_cfg": SceneEntityCfg("robot")}
         )   # [2]
 
@@ -223,7 +223,6 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
-            # Total: rel_dist[1] + heading[2] + joint_vel[2] + last_action[2] + lidar[144] = 151
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
@@ -244,14 +243,13 @@ class RewardsCfg:
     carrot_pass = RewTerm(
         func=mdp.reward_carrot_pass,
         weight=12.0,             # large sparse bonus — clear peak signal for PPO
-        params={}
     )
 
     # --- NEGATIVE CONSTRAINTS ---
 
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-0.05,
+        weight=-0.5,
         params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.3}
     )
 

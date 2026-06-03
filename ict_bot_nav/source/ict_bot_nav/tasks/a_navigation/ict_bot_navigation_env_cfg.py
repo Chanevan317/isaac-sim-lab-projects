@@ -20,7 +20,7 @@ class IctBotNavigationEnvCfg(NavigationEnvCfg):
 
     # Action/Observation/State spaces
     action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 151  # [RelDist(1), Head(2), WheelVel(2), LastAct(2), Lidar_t(72), Lidar_t1(72)]
+    observation_space = 152  # [RelDist(2), Head(2), WheelVel(2), LastAct(2), Lidar_t(72), Lidar_t1(72)]
     state_space = 0
     
     # Physical properties
@@ -50,5 +50,5 @@ class IctBotNavigationEnvCfg_PLAY(IctBotNavigationEnvCfg):
         self.observations.policy.enable_corruption = False
 
         # Lock obstacles at a specific curriculum level for play
-        # 0=no obstacles, 1=2 static, 2=4 static, 3=4 slow, 4=6 moderate, 5=8 full
-        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 3
+        # 0=warm-up, 1=single static, 2=two static, 3=two slow moving, 4=three moderate speed, 5=four full speed
+        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 4
