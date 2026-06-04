@@ -60,17 +60,6 @@ def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     return torch.cat([forward_dist, lateral_offset], dim=-1)  # [N, 2]
 
 
-# def heading_error(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Angle to target where 0.0 rad is the -Y axis (The Face)."""
-#     local_pos = rel_target_pos(env, robot_cfg)
-    
-#     # Using your -Y logic: Side is X, Forward is -Y
-#     angle = torch.atan2(local_pos[:, 0], -local_pos[:, 1])
-    
-#     # Return as a 2-element vector per environment
-#     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
-
-
 def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     """
     Angle from robot forward to the nearest point on the carrot line.
@@ -121,7 +110,7 @@ def lidar_scan(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, num_beams: in
     distances = torch.norm(hits - robot_pos, dim=-1)              # [N, num_beams]
 
     # --- Clamp and normalise ---
-    max_range = 8.0
+    max_range = 4.0
     distances = torch.clamp(distances, 0.0, max_range) / max_range
 
     # --- Gaussian noise for sim-to-real ---

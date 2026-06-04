@@ -85,19 +85,23 @@ def reward_velocity_toward_carrot(
     forward_world = quat_apply(robot.data.root_quat_w, forward_local)
     cos_heading = (forward_world[:, :2] * corridor_fwd).sum(dim=-1)  # [N]
 
-    # Lateral penalty — discourages robot from leaving the 2m line zone
-    env_origins = env.scene.env_origins
-    lateral_dist = torch.abs(
-        robot.data.root_pos_w[:, 1] - env_origins[:, 1]
-    )
-    # Smooth penalty that grows beyond 1.0m lateral offset
-    lateral_penalty = torch.clamp(lateral_dist - 1.0, min=0.0)  # 0 within bounds
-
     # ---- Combined reward ----
     max_speed = 0.5
     vel_normalised = vel_toward_line / max_speed
-    c = 0.05
-    return (vel_normalised * torch.clamp(cos_heading, min=0.0) - c - lateral_penalty) * 10.0
+    speed = torch.norm(vel_xy, dim=-1)
+    moving = (speed > 0.05).float()
+
+    # Positive reward: moving toward line while facing corridor
+    positive = torch.clamp(vel_normalised, min=0.0) * torch.clamp(cos_heading, min=0.0)
+
+    # Negative penalties — each wrong dimension penalised independently
+    wrong_heading  = torch.clamp(-cos_heading, min=0.0) * 0.5   # facing away
+    wrong_velocity = torch.clamp(-vel_normalised, min=0.0)       # moving away
+
+    # Stationary penalty
+    stationary = (1.0 - moving) * 0.5
+
+    return (positive - wrong_heading - wrong_velocity - stationary) * 10.0
 
 
 def reward_carrot_pass(env: ManagerBasedRLEnv):
@@ -112,14 +116,31 @@ def reward_carrot_pass(env: ManagerBasedRLEnv):
 
 # --- NEGATIVE ---
 
-def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, danger_dist=0.3):
-    """
-    Soft proximity penalty using lidar_scan observation.
-    Uses current frame only [:, :72].
-    danger_dist in metres — converted to normalised units with max_range=8.0
-    """
-    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]
-    threshold = danger_dist / 8.0                           # normalised
-    danger_beams = (scan < threshold).float()
-    return torch.clamp(danger_beams.sum(dim=-1), max=8.0)   # cap at 8 beams
+def lidar_proximity_penalty(env, sensor_cfg, safe_dist=0.5):
+    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]  # [N, 72]
+
+    # Forward 180° sector — beams facing roughly forward
+    # For a 360° LiDAR with beam 54 at front, beams 36-72 cover 180° front sector
+    forward_sector = scan[:, 36:72]  # [N, 36]
+    min_dist = forward_sector.min(dim=-1).values   # [N]
+
+    min_dist_m = min_dist * 4.0
+
+    penalty = torch.clamp(
+        (safe_dist - min_dist_m) / safe_dist, min=0.0
+    ) ** 2
+
+    return penalty  # [N], range [0, 1]
+
+
+# def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, danger_dist=0.3):
+#     """
+#     Soft proximity penalty using lidar_scan observation.
+#     Uses current frame only [:, :72].
+#     danger_dist in metres — converted to normalised units with max_range=8.0
+#     """
+#     scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]
+#     threshold = danger_dist / 8.0                           # normalised
+#     danger_beams = (scan < threshold).float()
+#     return torch.clamp(danger_beams.sum(dim=-1), max=8.0)   # cap at 8 beams
 

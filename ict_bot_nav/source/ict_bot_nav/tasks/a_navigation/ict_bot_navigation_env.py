@@ -95,7 +95,6 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     raycaster = MultiMeshRayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/link_base",
         offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.2)),
-        ray_alignment="yaw",
         mesh_prim_paths=[
             MultiMeshRayCasterCfg.RaycastTargetCfg(
                 prim_expr="{ENV_REGEX_NS}/corridor", 
@@ -146,7 +145,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             horizontal_fov_range=(0.0, 360.0), 
             horizontal_res=5.0
         ),
-        max_distance=8.0,
+        max_distance=4.0,
         debug_vis=True,
     )
 
@@ -249,13 +248,13 @@ class RewardsCfg:
 
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-0.5,
-        params={"sensor_cfg": SceneEntityCfg("raycaster"), "danger_dist": 0.3}
+        weight=-5.0,
+        params={"sensor_cfg": SceneEntityCfg("raycaster")}
     )
 
     termination_penalty = RewTerm(
         func=mdp.is_terminated,   # built-in Isaac Lab term, fires -1 on termination step
-        weight=-10.0,
+        weight=-50.0,
     )
 
     # action_rate = RewTerm(
