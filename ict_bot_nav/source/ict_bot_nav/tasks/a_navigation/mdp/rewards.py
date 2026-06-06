@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from isaaclab.managers import SceneEntityCfg
 
 
-# --- POSITIVE ---
 
 # def reward_velocity_toward_carrot(
 #     env: ManagerBasedRLEnv,
@@ -113,24 +112,48 @@ def reward_carrot_pass(env: ManagerBasedRLEnv):
     return torch.clamp(delta, min=0.0)
 
 
+def reward_corridor_clearance(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, safe_dist: float = 0.7):
+    """
+    Signed clearance reward using forward 180°.
+    Positive = clear ahead (> safe_dist), zero = at threshold, negative = too close.
+    Range: [-1, +1]
+    """
+    # Use current frame only — sector_t is first 18 values
+    stacked  = lidar_scan(env, sensor_cfg, num_beams=72)
+    beams_t = stacked[:, :72]
 
-# --- NEGATIVE ---
+    # Forward 180° = beams 36-71 (robot front is -Y = beam 54 centre)
+    forward_beams = beams_t[:, 36:]                        # [N, 36]
+    min_forward_m = forward_beams.min(dim=-1).values * 3.0 # metres
 
-def lidar_proximity_penalty(env, sensor_cfg, safe_dist=0.5):
-    scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]  # [N, 72]
+    # Normalised distance ratio: 1.0 at contact, 0.0 at safe_dist
+    ratio   = torch.clamp((safe_dist - min_forward_m) / safe_dist, 0.0, 1.0)
 
-    # Forward 180° sector — beams facing roughly forward
-    # For a 360° LiDAR with beam 54 at front, beams 36-72 cover 180° front sector
-    forward_sector = scan[:, 36:72]  # [N, 36]
-    min_dist = forward_sector.min(dim=-1).values   # [N]
+    # Quadratic penalty term: 0 at safe_dist, 1.0 at contact
+    penalty = ratio ** 2                                       # [N]
 
-    min_dist_m = min_dist * 4.0
+    # Clearance bonus: linear, 0 at safe_dist, 1.0 at max_range
+    bonus   = torch.clamp((min_forward_m - safe_dist) / (3.0 - safe_dist), 0.0, 1.0)
 
-    penalty = torch.clamp(
-        (safe_dist - min_dist_m) / safe_dist, min=0.0
-    ) ** 2
+    # Combined: positive when clear, zero at threshold, negative (quadratic) when close
+    return bonus - penalty                                     # [N], range [-1, +1]                     # [N]
 
-    return penalty  # [N], range [0, 1]
+
+# def lidar_proximity_penalty(env, sensor_cfg, safe_dist=0.5):
+#     scan = lidar_scan(env, sensor_cfg, num_beams=72)[:, :72]  # [N, 72]
+
+#     # Forward 180° sector — beams facing roughly forward
+#     # For a 360° LiDAR with beam 54 at front, beams 36-72 cover 180° front sector
+#     forward_sector = scan[:, 36:72]  # [N, 36]
+#     min_dist = forward_sector.min(dim=-1).values   # [N]
+
+#     min_dist_m = min_dist * 4.0
+
+#     penalty = torch.clamp(
+#         (safe_dist - min_dist_m) / safe_dist, min=0.0
+#     ) ** 2
+
+#     return penalty  # [N], range [0, 1]
 
 
 # def lidar_proximity_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, danger_dist=0.3):

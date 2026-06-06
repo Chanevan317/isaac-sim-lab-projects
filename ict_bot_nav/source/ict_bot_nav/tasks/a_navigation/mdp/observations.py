@@ -110,7 +110,7 @@ def lidar_scan(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, num_beams: in
     distances = torch.norm(hits - robot_pos, dim=-1)              # [N, num_beams]
 
     # --- Clamp and normalise ---
-    max_range = 4.0
+    max_range = 3.0
     distances = torch.clamp(distances, 0.0, max_range) / max_range
 
     # --- Gaussian noise for sim-to-real ---

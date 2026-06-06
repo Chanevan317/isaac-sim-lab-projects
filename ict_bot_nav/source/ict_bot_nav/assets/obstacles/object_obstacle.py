@@ -46,7 +46,7 @@ def _collision() -> sim_utils.CollisionPropertiesCfg:
 CUBE_LARGE_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CubeLarge",
     spawn=sim_utils.CuboidCfg(
-        size=(0.6, 0.6, 0.7),
+        size=(0.5, 0.5, 0.7),
         rigid_props=_rigid_props(),
         mass_props=_mass(),
         collision_props=_collision(),
@@ -58,7 +58,7 @@ CUBE_LARGE_CFG = RigidObjectCfg(
 CUBE_MEDIUM_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CubeMedium",
     spawn=sim_utils.CuboidCfg(
-        size=(0.4, 0.4, 0.7),
+        size=(0.3, 0.3, 0.7),
         rigid_props=_rigid_props(),
         mass_props=_mass(),
         collision_props=_collision(),
@@ -70,7 +70,7 @@ CUBE_MEDIUM_CFG = RigidObjectCfg(
 CUBE_SMALL_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CubeSmall",
     spawn=sim_utils.CuboidCfg(
-        size=(0.2, 0.2, 0.7),
+        size=(0.1, 0.1, 0.7),
         rigid_props=_rigid_props(),
         mass_props=_mass(),
         collision_props=_collision(),
@@ -89,7 +89,7 @@ CUBE_SMALL_CFG = RigidObjectCfg(
 CYLINDER_LARGE_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CylinderLarge",
     spawn=sim_utils.CylinderCfg(
-        radius=0.30,
+        radius=0.25,
         height=0.7,
         rigid_props=_rigid_props(),
         mass_props=_mass(),
@@ -102,7 +102,7 @@ CYLINDER_LARGE_CFG = RigidObjectCfg(
 CYLINDER_MEDIUM_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CylinderMedium",
     spawn=sim_utils.CylinderCfg(
-        radius=0.20,
+        radius=0.15,
         height=0.7,
         rigid_props=_rigid_props(),
         mass_props=_mass(),
@@ -115,7 +115,7 @@ CYLINDER_MEDIUM_CFG = RigidObjectCfg(
 CYLINDER_SMALL_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CylinderSmall",
     spawn=sim_utils.CylinderCfg(
-        radius=0.10,
+        radius=0.05,
         height=0.7,
         rigid_props=_rigid_props(),
         mass_props=_mass(),
@@ -144,12 +144,12 @@ SHAPE_NAMES = {
 # Bounding radius for spacing checks — half the diagonal for cubes,
 # actual radius for cylinders
 SHAPE_RADIUS = {
-    0: 0.42,   # cube large  — half diagonal of 0.6×0.6
-    1: 0.28,   # cube medium — half diagonal of 0.4×0.4
-    2: 0.14,   # cube small  — half diagonal of 0.2×0.2
-    3: 0.30,   # cylinder large
-    4: 0.20,   # cylinder medium
-    5: 0.10,   # cylinder small
+    0: 0.35,   # cube large  — half diagonal of 0.5×0.5
+    1: 0.21,   # cube medium — half diagonal of 0.3×0.3
+    2: 0.07,   # cube small  — half diagonal of 0.1×0.1
+    3: 0.25,   # cylinder large
+    4: 0.15,   # cylinder medium
+    5: 0.05,   # cylinder small
 }
 
 

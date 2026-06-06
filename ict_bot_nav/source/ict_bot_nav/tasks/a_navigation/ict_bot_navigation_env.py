@@ -143,10 +143,11 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             channels=1, 
             vertical_fov_range=(0.0, 0.0), 
             horizontal_fov_range=(0.0, 360.0), 
-            horizontal_res=5.0
+            horizontal_res=5.0,  # 72 beams for full 360° coverage
         ),
-        max_distance=4.0,
-        debug_vis=True,
+        update_period=0.05,
+        max_distance=3.0,
+        debug_vis=False,
     )
 
     contact_sensor = ContactSensorCfg(
@@ -162,7 +163,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             "{ENV_REGEX_NS}/CylinderMedium",
             "{ENV_REGEX_NS}/CylinderLarge",
         ], 
-        visualizer_cfg=True,
+        visualizer_cfg=None,
     )
 
 
@@ -215,9 +216,9 @@ class ObservationsCfg:
             func=mdp.lidar_scan,
             params={
                 "sensor_cfg": SceneEntityCfg("raycaster"), 
-                "num_beams": 72
+                "num_beams": 72,
             }
-        )   # [144] — stacked lidar_t + lidar_t-1
+        )   # [54] — stacked lidar_t + lidar_t-1 + lidar_t-2
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -247,8 +248,8 @@ class RewardsCfg:
     # --- NEGATIVE CONSTRAINTS ---
 
     proximity_penalty = RewTerm(
-        func=mdp.lidar_proximity_penalty,
-        weight=-5.0,
+        func=mdp.reward_corridor_clearance,
+        weight=3.0,
         params={"sensor_cfg": SceneEntityCfg("raycaster")}
     )
 
@@ -397,7 +398,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for ict bot."""
 
     # Scene settings
-    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=25.0)
+    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=21.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
