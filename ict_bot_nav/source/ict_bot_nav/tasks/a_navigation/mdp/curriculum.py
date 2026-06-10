@@ -58,8 +58,8 @@ class CurriculumLevel:
 
 OBSTACLE_SCHEDULE: list[CurriculumLevel] = [
     CurriculumLevel(obstacle_count=0, max_speed=0.0, promote_threshold=0.60),  # 0 — warm-up
-    CurriculumLevel(obstacle_count=1, max_speed=0.0),   # 1 — single static
-    CurriculumLevel(obstacle_count=2, max_speed=0.0),   # 2 — two static
+    CurriculumLevel(obstacle_count=1, max_speed=0.1),   # 1 — single static
+    CurriculumLevel(obstacle_count=2, max_speed=0.2),   # 2 — two static
     CurriculumLevel(obstacle_count=2, max_speed=0.4),   # 3 — two slow moving
     CurriculumLevel(obstacle_count=3, max_speed=0.6),   # 4 — three moderate speed
     CurriculumLevel(obstacle_count=4, max_speed=0.8),   # 5 — four full speed

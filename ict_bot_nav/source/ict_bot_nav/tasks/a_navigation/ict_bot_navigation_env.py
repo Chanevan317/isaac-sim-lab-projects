@@ -207,10 +207,20 @@ class ObservationsCfg:
             func=mdp.joint_vel_rel
         )   # [2] - Required for real-world motor control
 
-        # Smoothness
-        last_action = ObsTerm(
-            func=mdp.last_action
-        )   # [2]
+        robot_vel = ObsTerm(
+            func=mdp.root_lin_vel_w,    # body-frame linear velocity [vx, vy]
+            params={"asset_cfg": SceneEntityCfg("robot")}
+        )  # [2]
+
+        robot_ang_vel = ObsTerm(
+            func=mdp.root_ang_vel_w,    # body-frame angular velocity [wz]
+            params={"asset_cfg": SceneEntityCfg("robot")}
+        )  # [1]
+
+        # # Smoothness
+        # last_action = ObsTerm(
+        #     func=mdp.last_action
+        # )   # [2]
 
         lidar_scan = ObsTerm(
             func=mdp.lidar_scan,
@@ -218,7 +228,7 @@ class ObservationsCfg:
                 "sensor_cfg": SceneEntityCfg("raycaster"), 
                 "num_beams": 72,
             }
-        )   # [54] — stacked lidar_t + lidar_t-1 + lidar_t-2
+        )   # [144] — stacked lidar_t + lidar_t-1
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -237,7 +247,9 @@ class RewardsCfg:
     velocity_toward_carrot = RewTerm(
         func=mdp.reward_velocity_toward_carrot,
         weight=1.0,
-        params={"robot_cfg": SceneEntityCfg("robot")}
+        params={
+            "robot_cfg": SceneEntityCfg("robot"),
+        }
     )
 
     carrot_pass = RewTerm(
@@ -248,9 +260,11 @@ class RewardsCfg:
     # --- NEGATIVE CONSTRAINTS ---
 
     proximity_penalty = RewTerm(
-        func=mdp.reward_corridor_clearance,
-        weight=3.0,
-        params={"sensor_cfg": SceneEntityCfg("raycaster")}
+        func=mdp.lidar_proximity_penalty,
+        weight=-5.0,                    # negative — quadratic output is always positive
+        params={
+            "sensor_cfg": SceneEntityCfg("raycaster"),
+        }
     )
 
     termination_penalty = RewTerm(
@@ -275,7 +289,7 @@ class MyEventCfg():
             "asset_cfg": SceneEntityCfg("robot"),
             "pose_range": {
                 "x":     (0.0, 1.0),
-                "y":     (-0.5, 0.5),
+                "y":     (-0.75, 0.75),
                 "z":     (0.1, 0.1),
                 "roll":  (0.0, 0.0),
                 "pitch": (0.0, 0.0),
@@ -354,28 +368,6 @@ class TerminationsCfg():
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-
-    # no_progress = DoneTerm(
-    #     func=mdp.stagnation_termination,
-    #     params={"robot_cfg": SceneEntityCfg("robot")}
-    # )
-
-    # too_close = DoneTerm(
-    #     func=mdp.lidar_collision,
-    #     params={
-    #         "sensor_cfg": SceneEntityCfg("raycaster"),
-    #         "threshold": 0.25  # 0.25m in world units
-    #     }
-    # )
-
-    # tipping = DoneTerm(
-    #     func=mdp.tipping_termination,
-    #     params={
-    #         "robot_cfg": SceneEntityCfg("robot"),
-    #         "max_pitch_deg": 20.0,
-    #         "max_roll_deg":  20.0,
-    #     }
-    # )
 
     # Terminate if the robot touches anything with a force > 1.0 N
     collision_termination = DoneTerm(

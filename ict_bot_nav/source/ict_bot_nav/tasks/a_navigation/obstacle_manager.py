@@ -42,7 +42,7 @@ class ObstacleManager:
     assets:
         List of six RigidObject handles in order:
         [cube_small, cube_medium, cube_large,
-         cyl_small,  cyl_medium,  cyl_large]
+        cyl_small,  cyl_medium,  cyl_large]
     cfg:
         ObstacleSetCfg instance.
     """
