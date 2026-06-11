@@ -143,11 +143,11 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             channels=1, 
             vertical_fov_range=(0.0, 0.0), 
             horizontal_fov_range=(0.0, 360.0), 
-            horizontal_res=5.0,  # 72 beams for full 360° coverage
+            horizontal_res=2.0,  # 180 beams for full 360° coverage
         ),
         update_period=0.05,
         max_distance=3.0,
-        debug_vis=False,
+        debug_vis=True,
     )
 
     contact_sensor = ContactSensorCfg(
@@ -189,8 +189,14 @@ class ObservationsCfg:
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
 
+        lidar_scan = ObsTerm(
+            func=mdp.lidar_scan,
+            params={
+                "sensor_cfg": SceneEntityCfg("raycaster"), 
+            }
+        )   # [3600] — 180 beams × 20 frames of history
+        
         # Targeting (Essential for navigation)
         rel_target = ObsTerm(
             func=mdp.rel_line_dist,
@@ -205,30 +211,18 @@ class ObservationsCfg:
         # Proprioception (Fixes the "weird" movement/speed control)
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel
-        )   # [2] - Required for real-world motor control
+        )   # [3] - Required for real-world motor control
 
         robot_vel = ObsTerm(
             func=mdp.root_lin_vel_w,    # body-frame linear velocity [vx, vy]
             params={"asset_cfg": SceneEntityCfg("robot")}
-        )  # [2]
+        )  # [3]
 
         robot_ang_vel = ObsTerm(
             func=mdp.root_ang_vel_w,    # body-frame angular velocity [wz]
             params={"asset_cfg": SceneEntityCfg("robot")}
-        )  # [1]
+        )  # [3]
 
-        # # Smoothness
-        # last_action = ObsTerm(
-        #     func=mdp.last_action
-        # )   # [2]
-
-        lidar_scan = ObsTerm(
-            func=mdp.lidar_scan,
-            params={
-                "sensor_cfg": SceneEntityCfg("raycaster"), 
-                "num_beams": 72,
-            }
-        )   # [144] — stacked lidar_t + lidar_t-1
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -489,8 +483,11 @@ class NavigationEnv(ManagerBasedRLEnv):
 
         self.episode_start_x[env_ids] = self.scene["robot"].data.root_pos_w[env_ids, 0]
 
-        if hasattr(self, "lidar_prev") and self.lidar_prev is not None:
-            self.lidar_prev[env_ids] = 0.0
+        # if hasattr(self, "lidar_prev") and self.lidar_prev is not None:
+        #     self.lidar_prev[env_ids] = 0.0
+
+        if hasattr(self, "_lidar_history") and self._lidar_history is not None:
+            self._lidar_history[env_ids] = 0.0
 
         place_carrot(self, env_ids)   # resets carrot_pass_count[env_ids] to 0.0
 

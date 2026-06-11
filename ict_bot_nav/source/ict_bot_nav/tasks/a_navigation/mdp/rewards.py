@@ -89,14 +89,9 @@ def lidar_proximity_penalty(
     sensor_cfg: SceneEntityCfg,
     safe_dist: float = 0.5,
 ) -> torch.Tensor:
-    """
-    Quadratic proximity penalty — separate, independent, directional.
-    Uses full 360° minimum for safety from all directions.
-    Range: [0, 1] — always positive, weight is negative in cfg.
-    """
-    stacked   = lidar_scan(env, sensor_cfg, num_beams=72)
-    beams_t   = stacked[:, :72]
-    forward_min = beams_t[:, 36:].min(dim=-1).values * 3.0   # forward 180°
+    
+    beams_t   = lidar_scan(env, sensor_cfg)  # 180 beams 
+    forward_min = beams_t[:, 90:].min(dim=-1).values * 3.0   # forward 180°
     global_min  = beams_t.min(dim=-1).values * 3.0            # all directions
 
     forward_ratio = torch.clamp((safe_dist - forward_min) / safe_dist, 0.0, 1.0)

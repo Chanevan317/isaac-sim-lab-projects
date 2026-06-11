@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 #     return local_pos[:, :2] # drop z, return [N, 2]
 
 
+
 def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     """
     Returns [forward_dist_to_line, lateral_offset_from_centreline].
@@ -58,6 +59,7 @@ def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     ).unsqueeze(-1) / 1.0   # normalised by CORRIDOR_HALF_WIDTH=1.0
 
     return torch.cat([forward_dist, lateral_offset], dim=-1)  # [N, 2]
+
 
 
 def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
@@ -91,37 +93,82 @@ def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
-def lidar_scan(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, num_beams: int = 72):
-    """
-    Returns stacked [lidar_t, lidar_t-1] normalised to [0,1] with Gaussian noise.
-    Returns zeros if sensor not present (navigation-only stage).
-    Shape: [N, 144]
-    """
-    # --- Guard: return zeros if sensor not in scene (Stage 1 navigation) ---
-    if sensor_cfg.name not in env.scene.keys():
-        if not hasattr(env, "lidar_prev") or env.lidar_prev is None:
-            env.lidar_prev = torch.zeros(env.num_envs, num_beams, device=env.device)
-        return torch.zeros(env.num_envs, num_beams * 2, device=env.device)
 
-    # --- Get current scan from ray caster ---
-    sensor = env.scene[sensor_cfg.name]
+def lidar_scan(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    num_beams: int = 180,
+):
+    """
+    Returns only the current frame of normalized LiDAR scan data [0, 1].
+    Temporal tracking is now handled downstream by the policy's recurrent GRU block.
+    Shape: [N, num_beams]
+    """
+    # --- Guard ---
+    if sensor_cfg.name not in env.scene.keys():
+        return torch.zeros(env.num_envs, num_beams, device=env.device)
+
+    # --- Raw scan ---
+    sensor    = env.scene[sensor_cfg.name]
     robot_pos = env.scene["robot"].data.root_pos_w.unsqueeze(1)  # [N, 1, 3]
-    hits = sensor.data.ray_hits_w                                 # [N, num_beams, 3]
+    hits      = sensor.data.ray_hits_w                            # [N, num_beams, 3]
     distances = torch.norm(hits - robot_pos, dim=-1)              # [N, num_beams]
 
-    # --- Clamp and normalise ---
+    # --- Normalise ---
     max_range = 3.0
     distances = torch.clamp(distances, 0.0, max_range) / max_range
+    noise     = torch.randn_like(distances) * 0.02
+    lidar_t   = torch.clamp(distances + noise, 0.0, 1.0)          # [N, num_beams]
 
-    # --- Gaussian noise for sim-to-real ---
-    noise = torch.randn_like(distances) * 0.02
-    lidar_t = torch.clamp(distances + noise, 0.0, 1.0)
+    return lidar_t
 
-    # --- Initialise prev on first call ---
-    if not hasattr(env, "lidar_prev") or env.lidar_prev is None:
-        env.lidar_prev = lidar_t.clone()
 
-    lidar_t1 = env.lidar_prev.clone()
-    env.lidar_prev = lidar_t.clone()
 
-    return torch.cat([lidar_t, lidar_t1], dim=-1)  # [N, 144]
+# def lidar_scan(
+#     env: ManagerBasedRLEnv,
+#     sensor_cfg: SceneEntityCfg,
+#     num_beams: int = 180,
+#     num_frames: int = 20,
+# ):
+#     """
+#     Returns stacked [lidar_t, lidar_t-1, ..., lidar_t-(n-1)] normalised to [0,1].
+#     At 20 Hz, 10 frames = 0.5 seconds of history.
+#     At 40 Hz reference paper used 40 frames = 1 second — we match 0.5s at 20 Hz.
+#     Shape: [N, num_beams * num_frames]
+#     """
+#     # --- Guard ---
+#     if sensor_cfg.name not in env.scene.keys():
+#         if not hasattr(env, "_lidar_history") or env._lidar_history is None:
+#             env._lidar_history = torch.zeros(
+#                 env.num_envs, num_frames, num_beams, device=env.device
+#             )
+#         return torch.zeros(env.num_envs, num_beams * num_frames, device=env.device)
+
+#     # --- Raw scan ---
+#     sensor    = env.scene[sensor_cfg.name]
+#     robot_pos = env.scene["robot"].data.root_pos_w.unsqueeze(1)  # [N, 1, 3]
+#     hits      = sensor.data.ray_hits_w                            # [N, num_beams, 3]
+#     distances = torch.norm(hits - robot_pos, dim=-1)              # [N, num_beams]
+
+#     # --- Normalise ---
+#     max_range = 3.0
+#     distances = torch.clamp(distances, 0.0, max_range) / max_range
+#     noise     = torch.randn_like(distances) * 0.02
+#     lidar_t   = torch.clamp(distances + noise, 0.0, 1.0)          # [N, num_beams]
+
+#     # --- Initialise history buffer on first call ---
+#     if not hasattr(env, "_lidar_history") or env._lidar_history is None:
+#         env._lidar_history = lidar_t.unsqueeze(1).expand(
+#             env.num_envs, num_frames, num_beams
+#         ).clone()
+
+#     # --- Shift history: drop oldest frame, prepend current ---
+#     # _lidar_history shape: [N, num_frames, num_beams]
+#     # index 0 = most recent (t), index num_frames-1 = oldest (t-(n-1))
+#     env._lidar_history = torch.cat([
+#         lidar_t.unsqueeze(1),              # [N, 1, num_beams] — new frame
+#         env._lidar_history[:, :-1, :]      # [N, num_frames-1, num_beams] — drop oldest
+#     ], dim=1)
+
+#     # --- Flatten to [N, num_beams * num_frames] ---
+#     return env._lidar_history.view(env.num_envs, -1)
