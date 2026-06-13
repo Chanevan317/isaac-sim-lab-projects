@@ -1,64 +1,39 @@
 seed: 42
 
 
-# Models are instantiated using skrl's model instantiator utility
-# https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
-models:
-  separate: False
-  policy:  # see gaussian_model parameters
-    class: GaussianMixin
-    clip_actions: False
-    clip_log_std: True
-    min_log_std: -20.0
-    max_log_std: 2.0
-    initial_log_std: 0.0
-    network:
-      # --- Path 1: Conv2D serving as a 1D spatial extractor across the 180 beams ---
-      - name: cnn
-        input: "OBSERVATIONS[:, :180].view(-1, 1, 1, 180)"  # Reshapes to [Batch, 1 Channel, 1 Height, 180 Width]
-        layers:
-          - conv2d: {out_channels: 32, kernel_size: [1, 5], stride: [1, 2]}
-          - conv2d: {out_channels: 64, kernel_size: [1, 3], stride: [1, 2]}
-          - flatten                                        # Flattens the [Batch, 64, 1, W_out] map to a vector
-          - 256                                            # Final dense projection
-        activations: relu
-
-      # --- Path 2: GRU processes the sequential temporal features from the CNN ---
-      - name: gru
-        input: cnn
-        layers: [256]
-        rnn: gru
-        rnn_layers: 1
-        rnn_sequence: 20
-
-      # --- Path 3: Process remaining 13 proprioceptive features ---
-      - name: proprio
-        input: "OBSERVATIONS[:, 180:]"
-        layers: [64]
-        activations: relu
-
-      # --- Path 4: Fusion & Policy Output Head ---
-      - name: net
-        input: "concatenate([gru, proprio])"
-        layers: [128, 64]
-        activations: relu
-    output: ACTIONS
-  value:  # see deterministic_model parameters
-    class: DeterministicMixin
-    clip_actions: False
-    network:
-      - name: net
-        input: OBSERVATIONS
-        layers: [256, 256]
-        activations: elu
-    output: ONE
+# # Models are instantiated using skrl's model instantiator utility
+# # https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
+# models:
+#   separate: False
+#   policy:  # see gaussian_model parameters
+#     class: GaussianMixin
+#     clip_actions: False
+#     clip_log_std: True
+#     min_log_std: -20.0
+#     max_log_std: 2.0
+#     initial_log_std: 0.0
+#     network:
+#       - name: net
+#         input: OBSERVATIONS
+#         layers: [64, 64]
+#         activations: relu
+#     output: ACTIONS
+#   value:  # see deterministic_model parameters
+#     class: DeterministicMixin
+#     clip_actions: False
+#     network:
+#       - name: net
+#         input: OBSERVATIONS
+#         layers: [64, 64]
+#         activations: relu
+#     output: ONE
 
 
-# Rollout memory
-# https://skrl.readthedocs.io/en/latest/api/memories/random.html
-memory:
-  class: RandomMemory
-  memory_size: -1  # automatically determined (same as agent:rollouts)
+# # Rollout memory
+# # https://skrl.readthedocs.io/en/latest/api/memories/random.html
+# memory:
+#   class: RandomMemory
+#   memory_size: -1  # automatically determined (same as agent:rollouts)
 
 
 # PPO agent configuration (field names are from PPO_DEFAULT_CONFIG)
@@ -101,5 +76,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 150000
+  timesteps: 100000
   environment_info: log

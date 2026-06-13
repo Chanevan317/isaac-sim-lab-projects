@@ -198,15 +198,81 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
-    experiment_cfg["trainer"]["close_environment_at_exit"] = False
-    experiment_cfg["agent"]["experiment"]["write_interval"] = 0  # don't log to TensorBoard
-    experiment_cfg["agent"]["experiment"]["checkpoint_interval"] = 0  # don't generate checkpoints
-    runner = Runner(env, experiment_cfg)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+    from skrl.agents.torch.ppo import PPO_RNN, PPO_CFG
+    from skrl.memories.torch import RandomMemory
+    from cnn_gru import SharedModel
+
+    from skrl.resources.preprocessors.torch import RunningStandardScaler
+
+    device   = env.device
+    num_envs = env.num_envs
+
+    # Must match exactly what was used during training
+    SEQ_LENGTH  = 32
+    HIDDEN_SIZE = 256
+    NUM_LAYERS  = 1
+
+    shared_model = SharedModel(
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        device=device,
+        num_envs=num_envs,
+        num_layers=NUM_LAYERS,
+        hidden_size=HIDDEN_SIZE,
+        sequence_length=SEQ_LENGTH,
+    )
+
+    models = {"policy": shared_model, "value": shared_model}
+
+    # Memory size does not matter for inference — use minimal
+    memory = RandomMemory(memory_size=1, num_envs=num_envs, device=device)
+
+    cfg = PPO_CFG()
+    cfg.state_preprocessor = RunningStandardScaler
+    cfg.state_preprocessor_kwargs = {"size": env.observation_space, "device": device}
+    cfg.value_preprocessor = RunningStandardScaler
+    cfg.value_preprocessor_kwargs = {"size": 1, "device": device}
+    cfg.experiment.write_interval = 0
+    cfg.experiment.checkpoint_interval = 0
+
+    agent = PPO_RNN(
+        models=models,
+        memory=memory,
+        cfg=cfg,
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        device=device,
+    )
+
+    agent.init(trainer_cfg=None)
+
+    # --- Materialize all Lazy* layers with a dummy forward pass before loading weights ---
+    with torch.no_grad():
+        dummy_obs = torch.zeros((num_envs, env.observation_space.shape[0]), device=device)
+        dummy_inputs = {
+            "observations": dummy_obs,
+            "states": None,
+            "terminated": torch.zeros(num_envs, dtype=torch.bool, device=device),
+            "rnn": agent._rnn_initial_states["policy"],
+        }
+        shared_model.compute(dummy_inputs, role="policy")
 
     print(f"[INFO] Loading model checkpoint from: {resume_path}")
-    runner.agent.load(resume_path)
-    # set agent to evaluation mode
-    runner.agent.set_running_mode("eval")
+    print("PRE-LOAD norm:", shared_model.policy_layer.weight.norm().item())
+    agent.load(resume_path)
+    print("POST-LOAD norm:", shared_model.policy_layer.weight.norm().item())
+    print("policy_layer weight sample:", shared_model.policy_layer.weight[0, :5])
+    print("policy_layer weight norm:", shared_model.policy_layer.weight.norm().item())
+    agent.enable_training_mode(False, apply_to_models=True)
+
+    ckpt = torch.load(resume_path, map_location=device)
+    print("Checkpoint top-level keys:", ckpt.keys())
+    print("Checkpoint policy keys (first 10):", list(ckpt["policy"].keys())[:10])
+    print("Model state_dict keys (first 10):", list(shared_model.state_dict().keys())[:10])
+
+    shared_model.eval()
 
     # reset environment
     obs, _ = env.reset()
@@ -218,7 +284,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+            outputs = agent.act(obs, None, timestep=0, timesteps=0)
             # - multi-agent (deterministic) actions
             if hasattr(env, "possible_agents"):
                 actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}

@@ -215,7 +215,90 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
-    runner = Runner(env, agent_cfg)
+    # runner = Runner(env, agent_cfg)
+    # env.unwrapped.runner = runner
+
+    import torch
+    from skrl.agents.torch.ppo import PPO_RNN, PPO_CFG
+    from skrl.resources.preprocessors.torch import RunningStandardScaler
+    from skrl.resources.schedulers.torch import KLAdaptiveLR
+    from skrl.memories.torch import RandomMemory
+    from skrl.trainers.torch import SequentialTrainer
+    from cnn_gru import SharedModel
+
+    device = env.device
+    num_envs = env.num_envs
+
+    mcfg = agent_cfg.get("model", {})
+    seq_len = mcfg.get("sequence_length", 32)
+
+    shared_model = SharedModel(
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        device=device,
+        num_envs=num_envs,
+        num_layers=mcfg.get("num_layers", 1),
+        hidden_size=mcfg.get("hidden_size", 256),
+        sequence_length=seq_len,
+    )
+
+    models = {"policy": shared_model, "value": shared_model}
+
+    acfg = agent_cfg["agent"]
+    rollouts = acfg["rollouts"]
+
+    memory = RandomMemory(memory_size=rollouts, num_envs=num_envs, device=device)
+
+    cfg = PPO_CFG()
+    cfg.rollouts = rollouts
+    cfg.learning_epochs = acfg["learning_epochs"]
+    cfg.mini_batches = acfg["mini_batches"]
+    cfg.discount_factor = acfg["discount_factor"]
+    cfg.lambda_ = acfg["lambda"]   # verify exact attribute name — may be `lambda_` since `lambda` is reserved
+    cfg.learning_rate = acfg["learning_rate"]
+    cfg.learning_rate_scheduler = KLAdaptiveLR
+    cfg.learning_rate_scheduler_kwargs = acfg["learning_rate_scheduler_kwargs"]
+    cfg.state_preprocessor = RunningStandardScaler
+    cfg.state_preprocessor_kwargs = {"size": env.observation_space, "device": device}
+    cfg.value_preprocessor = RunningStandardScaler
+    cfg.value_preprocessor_kwargs = {"size": 1, "device": device}
+    cfg.grad_norm_clip = acfg["grad_norm_clip"]
+    cfg.ratio_clip = acfg["ratio_clip"]
+    cfg.value_clip = acfg["value_clip"]
+    cfg.clip_predicted_values = acfg["clip_predicted_values"]
+    cfg.entropy_loss_scale = acfg["entropy_loss_scale"]
+    cfg.value_loss_scale = acfg["value_loss_scale"]
+    cfg.rewards_shaper = None
+    cfg.time_limit_bootstrap = acfg["time_limit_bootstrap"]
+    cfg.experiment.directory = log_root_path
+    cfg.experiment.experiment_name = log_dir
+    cfg.experiment.write_interval = "auto"
+    cfg.experiment.checkpoint_interval = acfg["experiment"]["checkpoint_interval"]
+
+    agent = PPO_RNN(
+        models=models,
+        memory=memory,
+        cfg=cfg,
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        device=device,
+    )
+
+    # --- shim so the logging block below (which expects `runner.agent`, `runner.run`) still works ---
+    class _RunnerShim:
+        def __init__(self, agent, env, timesteps):
+            self.agent = agent
+            self.env = env
+            self.timesteps = timesteps
+        def run(self):
+            trainer = SequentialTrainer(
+                cfg={"timesteps": self.timesteps, "headless": True},
+                env=self.env,
+                agents=self.agent,
+            )
+            trainer.train()
+
+    runner = _RunnerShim(agent, env, agent_cfg["trainer"]["timesteps"])
     env.unwrapped.runner = runner
 
 
@@ -230,11 +313,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     original_record_transition = runner.agent.record_transition
 
-    def custom_record_transition(
-        states, actions, rewards, next_states,
-        terminated, truncated, infos, timestep, timesteps
-    ):
+    def custom_record_transition(**kwargs):
         nonlocal ep_rewards, ep_lengths, ep_count, ep_distance_x
+
+        terminated = kwargs.get("terminated")
+        truncated  = kwargs.get("truncated")
+        rewards    = kwargs.get("rewards")
+        timestep   = kwargs.get("timestep")
+        timesteps  = kwargs.get("timesteps")
 
         dones_pre = (terminated | truncated).squeeze(-1)
         
@@ -256,10 +342,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             timeout_snapshot   = None
             terminated_snapshot = None
 
-        original_record_transition(
-            states, actions, rewards, next_states,
-            terminated, truncated, infos, timestep, timesteps
-        )
+        original_record_transition(**kwargs)
 
         ep_rewards += rewards.squeeze(-1)
         ep_lengths += 1

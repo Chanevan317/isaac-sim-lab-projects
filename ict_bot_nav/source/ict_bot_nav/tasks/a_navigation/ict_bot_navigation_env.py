@@ -195,7 +195,7 @@ class ObservationsCfg:
             params={
                 "sensor_cfg": SceneEntityCfg("raycaster"), 
             }
-        )   # [3600] — 180 beams × 20 frames of history
+        )   # [180] — 180 beams
         
         # Targeting (Essential for navigation)
         rel_target = ObsTerm(
@@ -210,17 +210,18 @@ class ObservationsCfg:
 
         # Proprioception (Fixes the "weird" movement/speed control)
         joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel
-        )   # [3] - Required for real-world motor control
+            func=mdp.joint_velocity,
+            params={"robot_cfg": SceneEntityCfg("robot", joint_names=["left_wheel_joint", "right_wheel_joint"])}
+        )   # [2] - Required for real-world motor control
 
         robot_vel = ObsTerm(
-            func=mdp.root_lin_vel_w,    # body-frame linear velocity [vx, vy]
-            params={"asset_cfg": SceneEntityCfg("robot")}
+            func=mdp.root_lin_vel_b_2d,    # body-frame linear velocity [vx, vy]
+            params={"robot_cfg": SceneEntityCfg("robot")}
         )  # [3]
 
         robot_ang_vel = ObsTerm(
-            func=mdp.root_ang_vel_w,    # body-frame angular velocity [wz]
-            params={"asset_cfg": SceneEntityCfg("robot")}
+            func=mdp.root_ang_vel_b_z,    # body-frame angular velocity [wz]
+            params={"robot_cfg": SceneEntityCfg("robot")}
         )  # [3]
 
 
@@ -255,7 +256,7 @@ class RewardsCfg:
 
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-5.0,                    # negative — quadratic output is always positive
+        weight=-3.0,                    # negative — quadratic output is always positive
         params={
             "sensor_cfg": SceneEntityCfg("raycaster"),
         }
@@ -405,6 +406,8 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 20.0
         # simulation settings
         self.sim.dt = 1.0 / 100.0
+        self.sim.physx.enable_external_forces_every_iteration = True
+        self.sim.physx.solver_velocity_iteration_count = 1
 
 
 ##

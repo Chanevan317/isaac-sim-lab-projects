@@ -94,6 +94,18 @@ def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
 
 
 
+def joint_velocity(env, robot_cfg: SceneEntityCfg):
+    robot = env.scene[robot_cfg.name]
+    return robot.data.joint_vel[:, robot_cfg.joint_ids]  # [N, 2] — raw rad/s
+
+def root_lin_vel_b_2d(env, robot_cfg):
+    return env.scene[robot_cfg.name].data.root_lin_vel_b[:, :2]  # [vx, vy]
+
+def root_ang_vel_b_z(env, robot_cfg):
+    return env.scene[robot_cfg.name].data.root_ang_vel_b[:, 2:3]  # [wz]
+
+
+
 def lidar_scan(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,

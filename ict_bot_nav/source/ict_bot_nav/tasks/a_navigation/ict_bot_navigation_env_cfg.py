@@ -20,7 +20,7 @@ class IctBotNavigationEnvCfg(NavigationEnvCfg):
 
     # Action/Observation/State spaces
     action_space = 2        # [linear_vel, angular_vel]
-    observation_space = 193  # [RelDist(2), Head(2), WheelVel(3), RobotVel(3), RobotAngVel(3), Lidar(180)]
+    observation_space = 189  # [RelDist(2), Head(2), WheelVel(2), RobotVel(2), RobotAngVel(1), Lidar(180)]
     state_space = 0
     
     # Physical properties

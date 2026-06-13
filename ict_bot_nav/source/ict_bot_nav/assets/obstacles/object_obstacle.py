@@ -2,9 +2,9 @@
 Static and dynamic rigid-body obstacle asset configurations for ICT-Bot Stage 1.
 
 Size tiers:
-  large  — 0.6 m (cube side / cylinder diameter)
-  medium — 0.4 m
-  small  — 0.2 m
+    large  — 0.6 m (cube side / cylinder diameter)
+    medium — 0.4 m
+    small  — 0.2 m
 
 All obstacles are 0.7 m tall so the LiDAR beam at ~0.3 m height hits reliably.
 Geometry is fixed at spawn (Isaac Lab constraint) — size variation is achieved
