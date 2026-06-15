@@ -87,14 +87,14 @@ def reward_carrot_pass(env: ManagerBasedRLEnv):
 def lidar_proximity_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
-    safe_dist: float = 0.5,
+    safe_dist: float = 0.75,
 ) -> torch.Tensor:
     
     beams_t   = lidar_scan(env, sensor_cfg)  # 180 beams 
-    forward_min = beams_t[:, 90:].min(dim=-1).values * 3.0   # forward 180°
-    global_min  = beams_t.min(dim=-1).values * 3.0            # all directions
+    forward_min = beams_t[:, 90:].min(dim=-1).values * 4.0   # forward 180°
+    global_min  = beams_t.min(dim=-1).values * 4.0            # all directions
 
     forward_ratio = torch.clamp((safe_dist - forward_min) / safe_dist, 0.0, 1.0)
     global_ratio  = torch.clamp((safe_dist - global_min)  / safe_dist, 0.0, 1.0)
 
-    return forward_ratio ** 2 * 2.0 + global_ratio ** 2  # forward weighted 2x                          # [N], range [0, 1]
+    return forward_ratio ** 2 * 1.3 + global_ratio ** 2  # forward weighted 2x                          # [N], range [0, 1]

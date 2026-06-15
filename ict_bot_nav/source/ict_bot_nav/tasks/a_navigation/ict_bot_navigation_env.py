@@ -146,7 +146,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             horizontal_res=2.0,  # 180 beams for full 360° coverage
         ),
         update_period=0.05,
-        max_distance=3.0,
+        max_distance=4.0,
         debug_vis=True,
     )
 
@@ -256,7 +256,7 @@ class RewardsCfg:
 
     proximity_penalty = RewTerm(
         func=mdp.lidar_proximity_penalty,
-        weight=-3.0,                    # negative — quadratic output is always positive
+        weight=-5.0,                    # negative — quadratic output is always positive
         params={
             "sensor_cfg": SceneEntityCfg("raycaster"),
         }

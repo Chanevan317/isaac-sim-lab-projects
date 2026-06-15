@@ -202,14 +202,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     from skrl.agents.torch.ppo import PPO_RNN, PPO_CFG
     from skrl.memories.torch import RandomMemory
-    from cnn_gru import SharedModel
-
     from skrl.resources.preprocessors.torch import RunningStandardScaler
+    from skrl.trainers.torch import SequentialTrainer
+    from skrl.trainers.torch.sequential import SequentialTrainerCfg
+    from cnn_gru import SharedModel
 
     device   = env.device
     num_envs = env.num_envs
 
-    # Must match exactly what was used during training
     SEQ_LENGTH  = 32
     HIDDEN_SIZE = 256
     NUM_LAYERS  = 1
@@ -225,8 +225,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     )
 
     models = {"policy": shared_model, "value": shared_model}
-
-    # Memory size does not matter for inference — use minimal
     memory = RandomMemory(memory_size=1, num_envs=num_envs, device=device)
 
     cfg = PPO_CFG()
@@ -239,72 +237,37 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     agent = PPO_RNN(
         models=models,
-        memory=memory,
+        memory=None,   # ← pass None, trainer will handle it
         cfg=cfg,
         observation_space=env.observation_space,
         action_space=env.action_space,
         device=device,
     )
 
-    agent.init(trainer_cfg=None)
-
-    # --- Materialize all Lazy* layers with a dummy forward pass before loading weights ---
+    # Materialize lazy layers — eval mode first so it uses the single-step branch
+    shared_model.eval()
     with torch.no_grad():
         dummy_obs = torch.zeros((num_envs, env.observation_space.shape[0]), device=device)
-        dummy_inputs = {
+        dummy_h   = torch.zeros(NUM_LAYERS, num_envs, HIDDEN_SIZE, device=device)
+        shared_model.compute({
             "observations": dummy_obs,
-            "states": None,
-            "terminated": torch.zeros(num_envs, dtype=torch.bool, device=device),
-            "rnn": agent._rnn_initial_states["policy"],
-        }
-        shared_model.compute(dummy_inputs, role="policy")
+            "terminated":   torch.zeros(num_envs, dtype=torch.bool, device=device),
+            "rnn":          [dummy_h],
+        }, role="policy")
 
     print(f"[INFO] Loading model checkpoint from: {resume_path}")
-    print("PRE-LOAD norm:", shared_model.policy_layer.weight.norm().item())
     agent.load(resume_path)
-    print("POST-LOAD norm:", shared_model.policy_layer.weight.norm().item())
-    print("policy_layer weight sample:", shared_model.policy_layer.weight[0, :5])
-    print("policy_layer weight norm:", shared_model.policy_layer.weight.norm().item())
     agent.enable_training_mode(False, apply_to_models=True)
+    shared_model.eval()   # redundant but harmless
 
-    ckpt = torch.load(resume_path, map_location=device)
-    print("Checkpoint top-level keys:", ckpt.keys())
-    print("Checkpoint policy keys (first 10):", list(ckpt["policy"].keys())[:10])
-    print("Model state_dict keys (first 10):", list(shared_model.state_dict().keys())[:10])
+    trainer_cfg = SequentialTrainerCfg()
+    trainer_cfg.timesteps = 10000
+    trainer_cfg.headless  = False
+    trainer_cfg.close_environment_at_exit = False
 
-    shared_model.eval()
+    trainer = SequentialTrainer(env=env, agents=agent, cfg=trainer_cfg)
+    trainer.eval()
 
-    # reset environment
-    obs, _ = env.reset()
-    timestep = 0
-    # simulate environment
-    while simulation_app.is_running():
-        start_time = time.time()
-
-        # run everything in inference mode
-        with torch.inference_mode():
-            # agent stepping
-            outputs = agent.act(obs, None, timestep=0, timesteps=0)
-            # - multi-agent (deterministic) actions
-            if hasattr(env, "possible_agents"):
-                actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}
-            # - single-agent (deterministic) actions
-            else:
-                actions = outputs[-1].get("mean_actions", outputs[0])
-            # env stepping
-            obs, _, _, _, _ = env.step(actions)
-        if args_cli.video:
-            timestep += 1
-            # exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
-
-        # time delay for real-time evaluation
-        sleep_time = dt - (time.time() - start_time)
-        if args_cli.real_time and sleep_time > 0:
-            time.sleep(sleep_time)
-
-    # close the simulator
     env.close()
 
 

@@ -127,7 +127,7 @@ def lidar_scan(
     distances = torch.norm(hits - robot_pos, dim=-1)              # [N, num_beams]
 
     # --- Normalise ---
-    max_range = 3.0
+    max_range = 4.0
     distances = torch.clamp(distances, 0.0, max_range) / max_range
     noise     = torch.randn_like(distances) * 0.02
     lidar_t   = torch.clamp(distances + noise, 0.0, 1.0)          # [N, num_beams]
