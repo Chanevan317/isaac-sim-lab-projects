@@ -26,8 +26,8 @@ class IctBotNavigationEnvCfg(NavigationEnvCfg):
     # Physical properties
     wheel_radius = 0.1
     wheel_spacing = 0.16
-    max_linear_velocity = 1.0
-    max_angular_velocity = 10.0
+    max_linear_velocity = 2.0
+    max_angular_velocity = 15.0
     
     # Custom parameters/scales
     wheel_dof_name = [
@@ -50,5 +50,4 @@ class IctBotNavigationEnvCfg_PLAY(IctBotNavigationEnvCfg):
         self.observations.policy.enable_corruption = False
 
         # Lock obstacles at a specific curriculum level for play
-        # 0=warm-up, 1=single static, 2=two static, 3=two slow moving, 4=three moderate speed, 5=four full speed
-        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 5
+        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 7

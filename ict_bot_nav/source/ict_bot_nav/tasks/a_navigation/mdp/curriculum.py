@@ -50,19 +50,22 @@ if TYPE_CHECKING:
 @dataclasses.dataclass
 class CurriculumLevel:
     """One row in the obstacle curriculum schedule."""
-    obstacle_count: int
+    obstacle_count: int    # PER SEGMENT (0, 1, or 2) — not total
     max_speed: float
+    corner_active: bool = False
     promote_threshold: float = 0.70
     demote_threshold: float  = 0.40
 
 
 OBSTACLE_SCHEDULE: list[CurriculumLevel] = [
-    CurriculumLevel(obstacle_count=0, max_speed=0.0, promote_threshold=0.60),  # 0 — warm-up
-    CurriculumLevel(obstacle_count=1, max_speed=0.1),   # 1 — single static
-    CurriculumLevel(obstacle_count=2, max_speed=0.2),   # 2 — two static
-    CurriculumLevel(obstacle_count=2, max_speed=0.4),   # 3 — two slow moving
-    CurriculumLevel(obstacle_count=3, max_speed=0.6),   # 4 — three moderate speed
-    CurriculumLevel(obstacle_count=4, max_speed=0.8),   # 5 — four full speed
+    CurriculumLevel(obstacle_count=0, max_speed=0.0,  promote_threshold=0.60),
+    CurriculumLevel(obstacle_count=1, max_speed=0.0),
+    CurriculumLevel(obstacle_count=2, max_speed=0.0),
+    CurriculumLevel(obstacle_count=2, max_speed=0.3),
+    CurriculumLevel(obstacle_count=2, max_speed=0.5,  corner_active=True),
+    CurriculumLevel(obstacle_count=2, max_speed=0.8,  corner_active=True),
+    CurriculumLevel(obstacle_count=2, max_speed=1.0,  corner_active=True), 
+    CurriculumLevel(obstacle_count=3, max_speed=1.0,  corner_active=True),
 ]
 
 
@@ -201,8 +204,13 @@ def obstacle_curriculum_term(
     return {
         "obstacle_level":        env._obs_curr_level,
         "obstacle_success_rate": success_rate,
-        "obstacle_count":        OBSTACLE_SCHEDULE[env._obs_curr_level].obstacle_count,
+        "obstacle_count_per_seg": OBSTACLE_SCHEDULE[env._obs_curr_level].obstacle_count,
+        "obstacle_total":        (
+            OBSTACLE_SCHEDULE[env._obs_curr_level].obstacle_count * 2 +
+            (1 if OBSTACLE_SCHEDULE[env._obs_curr_level].corner_active else 0)
+        ),
         "obstacle_max_speed":    OBSTACLE_SCHEDULE[env._obs_curr_level].max_speed,
+        "corner_active":         OBSTACLE_SCHEDULE[env._obs_curr_level].corner_active,
         "obstacle_cooldown":     env._obs_curr_cooldown,
     }
 
@@ -214,6 +222,7 @@ def _apply_curriculum(env: "ManagerBasedRLEnv", level: int) -> None:
         env.obstacle_manager.set_curriculum_params(
             obstacle_count=schedule.obstacle_count,
             max_speed=schedule.max_speed,
+            corner_active=getattr(schedule, "corner_active", False),
         )
     else:
         raise AttributeError(

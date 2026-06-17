@@ -67,9 +67,9 @@ class SharedModel(GaussianMixin, DeterministicMixin, Model):
         # --- Fusion MLP ---
         self.net_container = nn.Sequential(
             nn.LazyLinear(out_features=128),
-            nn.ReLU(),
+            nn.ELU(),
             nn.LazyLinear(out_features=64),
-            nn.ReLU(),
+            nn.ELU(),
         )
 
         self.policy_layer = nn.LazyLinear(out_features=self.num_actions)

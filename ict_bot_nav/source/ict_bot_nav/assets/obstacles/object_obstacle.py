@@ -179,11 +179,11 @@ class ObstacleSetCfg:
         Maximum translational speed m/s. 0 = static only.
     """
 
-    max_obstacles: int = 4        # matches curriculum level 5 ceiling
+    max_obstacles: int = 7       # matches curriculum ceiling
     shapes: list[int] = dataclasses.field(
         default_factory=lambda: [0, 1, 2, 3, 4, 5]
     )
     corridor_half_width: float = 1.5
     spawn_radius: float = 4.0
-    min_obstacle_spacing: float = 0.3
-    max_speed: float = 0.8
+    min_obstacle_spacing: float = 0.15
+    max_speed: float = 1.0

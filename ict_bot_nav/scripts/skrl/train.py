@@ -307,14 +307,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     ep_rewards    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_lengths    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
-    ep_distance_x = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_count      = 0
-    ep_level_counts = torch.zeros(6, device=env_cfg.sim.device)
+    ep_level_counts = torch.zeros(8, device=env_cfg.sim.device) # 1. Expanded from 6 to 8
 
     original_record_transition = runner.agent.record_transition
 
     def custom_record_transition(**kwargs):
-        nonlocal ep_rewards, ep_lengths, ep_count, ep_distance_x
+        nonlocal ep_rewards, ep_lengths, ep_count
 
         terminated = kwargs.get("terminated")
         truncated  = kwargs.get("truncated")
@@ -323,23 +322,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         timesteps  = kwargs.get("timesteps")
 
         dones_pre = (terminated | truncated).squeeze(-1)
-        
-        # Snapshot EVERYTHING before original_record_transition resets env state
+
         if dones_pre.any():
-            carrot_snapshot = env.carrot_pass_count[dones_pre].clone() \
-                if hasattr(env, "carrot_pass_count") else None
-            
-            # Snapshot X progress BEFORE _reset_idx updates episode_start_x
-            current_x_snapshot = env.scene["robot"].data.root_pos_w[dones_pre, 0].clone()
-            start_x_snapshot   = env.episode_start_x[dones_pre].clone()
-            distance_snapshot  = current_x_snapshot - start_x_snapshot
-            
             timeout_snapshot    = truncated.squeeze(-1)[dones_pre].float().clone()
             terminated_snapshot = terminated.squeeze(-1)[dones_pre].float().clone()
         else:
-            carrot_snapshot    = None
-            distance_snapshot  = None
-            timeout_snapshot   = None
+            timeout_snapshot    = None
             terminated_snapshot = None
 
         original_record_transition(**kwargs)
@@ -354,33 +342,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 custom_record_transition._buf = {
                     "rewards":     [],
                     "lengths":     [],
-                    "distance_x":  [],
                     "timeouts":    [],
                     "stagnations": [],
-                    "carrots":     [],
                     "obs_level":   [],
-                    "success":     [],
                 }
 
             buf = custom_record_transition._buf
+            obs_level = getattr(env, "_obs_curr_level", 0)
 
-            done_rewards    = ep_rewards[dones].clone()
-            done_lengths    = ep_lengths[dones].clone()
-            obs_level       = getattr(env, "_obs_curr_level", 0)
-
-            buf["rewards"].append(done_rewards)
-            buf["lengths"].append(done_lengths)
-            buf["distance_x"].append(distance_snapshot)
+            buf["rewards"].append(ep_rewards[dones].clone())
+            buf["lengths"].append(ep_lengths[dones].clone())
             buf["timeouts"].append(timeout_snapshot)
             buf["stagnations"].append(terminated_snapshot)
-            buf["success"].append((distance_snapshot >= 4.0).float())
             buf["obs_level"].append(
-                torch.full((dones.sum().item(),), obs_level,
-                        dtype=torch.float32, device=env_cfg.sim.device)
+                torch.full(
+                    (dones.sum().item(),), obs_level,
+                    dtype=torch.float32, device=env_cfg.sim.device
+                )
             )
-
-            if carrot_snapshot is not None:
-                buf["carrots"].append(carrot_snapshot)
 
             ep_count          += dones.sum().item()
             ep_rewards[dones]  = 0.0
@@ -390,39 +369,50 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if timestep % 500 == 0:
             buf = getattr(custom_record_transition, "_buf", {})
 
+            # 2. Added labels for Level 6 and Level 7
+            level_labels = {
+                0: "L0 — warm-up               (0 obs, static)",
+                1: "L1 — 1 per seg           (2 total, static)",
+                2: "L2 — 2 per seg           (4 total, static)",
+                3: "L3 — 2 per seg    (4 total, slow 0.30 m/s)",
+                4: "L4 — 2 per seg + corner (5 total, 0.5 m/s)",
+                5: "L5 — 2 per seg + corner (5 total, 0.8 m/s)",
+                6: "L6 — 2 per seg + corner (5 total, 1.0 m/s)",
+                7: "L7 — 3 per seg + corner (7 total, 1.0 m/s)",
+            }
+
+            curr_level  = getattr(env, "_obs_curr_level", 0)
+            curr_event  = getattr(env, "_obs_curr_last_event", "none")
+            curr_sr_buf = getattr(env, "_obs_curr_successes", [])
+            curr_sr_val = (
+                sum(curr_sr_buf[-2000:]) / len(curr_sr_buf[-2000:])
+                if len(curr_sr_buf) >= 200 else 0.0
+            )
+            curr_cooldown = getattr(env, "_obs_curr_cooldown", 0)
+            curr_consec   = getattr(env, "_obs_curr_consecutive", 0)
+
+            # Obstacle manager live state
+            obs_mgr = getattr(env, "obstacle_manager", None)
+            live_count  = getattr(obs_mgr, "_obstacle_count", 0) if obs_mgr else 0
+            live_speed  = getattr(obs_mgr, "_max_speed", 0.0)    if obs_mgr else 0.0
+            live_corner = getattr(obs_mgr, "_corner_active", False) if obs_mgr else False
+            live_total  = live_count * 2 + (1 if live_corner else 0)
+
             print("\n" + "=" * 70)
             print(f"  Timestep            : {timestep:>8} / {timesteps}  "
-                f"({100 * timestep / timesteps:.1f}%)")
+                  f"({100 * timestep / timesteps:.1f}%)")
             print(f"  Episodes finished   : {int(ep_count)}")
 
             if buf.get("rewards"):
-                all_r     = torch.cat(buf["rewards"])
-                all_l     = torch.cat(buf["lengths"])
-                all_dx    = torch.cat(buf["distance_x"])
-                all_to    = torch.cat(buf["timeouts"])
-                all_st    = torch.cat(buf["stagnations"])
-                all_succ  = torch.cat(buf["success"])
-                all_level = torch.cat(buf["obs_level"])
+                all_r  = torch.cat(buf["rewards"])
+                all_l  = torch.cat(buf["lengths"])
+                all_to = torch.cat(buf["timeouts"])
+                all_st = torch.cat(buf["stagnations"])
 
-                step_dt     = env_cfg.sim.dt * env_cfg.decimation
-                mean_ep_s   = all_l.mean().item() * step_dt
-                mean_speed  = all_dx.mean().item() / (mean_ep_s + 1e-6)
-                success_rt  = all_succ.mean().item()
-                timeout_rt  = all_to.mean().item()
+                step_dt      = env_cfg.sim.dt * env_cfg.decimation
+                mean_ep_s    = all_l.mean().item() * step_dt
+                timeout_rt   = all_to.mean().item()
                 terminate_rt = all_st.mean().item()
-                curr_level  = int(all_level[-1].item())
-                curr_event = getattr(env, "_obs_curr_last_event", "none")
-                curr_sr    = getattr(env, "_obs_curr_successes", [])
-                curr_sr_val = (sum(curr_sr[-2000:]) / len(curr_sr[-2000:])) if len(curr_sr) >= 200 else 0.0
-
-                level_labels = {
-                    0: "L0 — warm-up (0 obs)",
-                    1: "L1 — 1 static",
-                    2: "L2 — 2 static",
-                    3: "L3 — 2 slow moving",
-                    4: "L4 — 3 moderate",
-                    5: "L5 — 4 full speed",
-                }
 
                 print("-" * 70)
                 print(f"  Mean Reward         : {all_r.mean().item():>8.3f}   ↑ want rising")
@@ -430,46 +420,43 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print(f"  Min  Reward         : {all_r.min().item():>8.3f}")
                 print("-" * 70)
                 print(f"  Mean Ep Duration    : {mean_ep_s:>7.1f} s")
-                print(f"  Mean X Progress     : {all_dx.mean().item():>7.2f} m   ↑ want rising")
-                print(f"  Max  X Progress     : {all_dx.max().item():>7.2f} m")
-                print(f"  Mean Speed (X/t)    : {mean_speed:>7.3f} m/s  ↑ toward 0.5")
-                print("-" * 70)
-
-                if buf.get("carrots") and len(buf["carrots"]) > 0:
-                    all_c = torch.cat(buf["carrots"])
-                    print(f"  Mean Carrots/ep     : {all_c.mean().item():>7.2f}   ↑ want rising")
-                    print(f"  Max  Carrots/ep     : {all_c.max().item():>7.0f}")
-                    print(f"  % eps ≥ 3 carrots   : "
-                        f"{(all_c >= 3).float().mean().item():>7.1%}  ↑ = curriculum success metric")
-
-                print("-" * 70)
-                print(f"  Success Rate        : {success_rt:>7.1%}   ↑ want > 70%")
                 print(f"  Timeout Rate        : {timeout_rt:>7.1%}   ↑ want high")
                 print(f"  Termination Rate    : {terminate_rt:>7.1%}   ↓ want low (collision)")
                 print("-" * 70)
+                print("  CURRICULUM")
+                print(f"    Level             : {curr_level}  {level_labels.get(curr_level, '')}")
+                print(f"    Success Rate      : {curr_sr_val:>7.1%}  (rolling 2000 eps)")
+                print(f"    Consecutive wins  : {curr_consec}")
+                print(f"    Cooldown remaining: {curr_cooldown} eps")
+                print(f"    Last event        : {curr_event}")
                 print("-" * 70)
-                print(f"  Curriculum Level    : {curr_level}  {level_labels.get(curr_level, '')}")
-                print(f"  Curriculum SR       : {curr_sr_val:>7.1%}  (rolling 2000 eps)")
-                print(f"  Last Event          : {curr_event}")
+                print("  ACTIVE OBSTACLES")
+                print(f"    Per segment       : {live_count}  (H: {live_count}, V: {live_count})")
+                print(f"    Corner active     : {live_corner}")
+                print(f"    Total             : {live_total}")
+                print(f"    Max speed         : {live_speed:.2f} m/s")
                 print("-" * 70)
                 print("  Level distribution  :")
-                for lvl in range(6):
-                    frac = (ep_level_counts[lvl] / ep_level_counts.sum().clamp(min=1)).item()
-                    bar  = "█" * int(frac * 20) if frac > 0.0 else ""
+                
+                # 3. Changed range(6) to range(8) so all levels display in terminal
+                for lvl in range(8):
+                    frac   = (
+                        ep_level_counts[lvl] /
+                        ep_level_counts.sum().clamp(min=1)
+                    ).item()
+                    bar    = "█" * int(frac * 20) if frac > 0.0 else ""
                     active = " ◄" if lvl == curr_level else ""
-                    print(f"    L{lvl} {level_labels.get(lvl, ''):22s}: {frac:>5.1%}  {bar}{active}")
-
+                    print(f"    L{lvl} {level_labels.get(lvl, ''):35s}: "
+                            f"{frac:>5.1%}  {bar}{active}")
                 print("-" * 70)
+
+                # Warnings
                 if terminate_rt > 0.5:
-                    print("  ⚠ termination > 50% — robot dying too often, check reward weights")
-                if success_rt < 0.1 and curr_level > 0:
-                    print("  ⚠ success < 10% at non-zero level — curriculum may need demotion")
-                if mean_speed < 0.2:
-                    print("  ⚠ mean speed < 0.2 m/s — policy may be standing still")
-                if buf.get("carrots") and len(buf["carrots"]) > 0:
-                    all_c = torch.cat(buf["carrots"])
-                    if all_c.mean().item() < 1.0 and curr_level == 0:
-                        print("  ⚠ mean carrots < 1 at L0 — robot not reaching carrot at all")
+                    print("  ⚠ termination > 50% — robot dying too often")
+                if curr_sr_val < 0.1 and curr_level > 0:
+                    print("  ⚠ success < 10% at non-zero level — consider demotion")
+                if timeout_rt < 0.5:
+                    print("  ⚠ timeout rate low — robot terminating frequently")
 
                 for key in buf:
                     buf[key] = []

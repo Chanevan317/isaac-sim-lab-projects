@@ -267,10 +267,10 @@ class RewardsCfg:
         weight=-50.0,
     )
 
-    # action_rate = RewTerm(
-    #     func=mdp.action_rate_l2,
-    #     weight=-0.01,
-    # )
+    action_rate = RewTerm(
+        func=mdp.action_rate_l2,
+        weight=-0.005,
+    )
 
 
 @configclass
@@ -278,22 +278,10 @@ class MyEventCfg():
     """Event specifications for the MDP."""
 
     reset_robot_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
+        func=mdp.reset_robot_l_corridor,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "pose_range": {
-                "x":     (0.0, 1.0),
-                "y":     (-0.75, 0.75),
-                "z":     (0.1, 0.1),
-                "roll":  (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw":   (1.0, 2.14),
-            },
-            "velocity_range": {
-                "linear":  {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
-                "angular": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
-            }
         },
     )
 
@@ -338,15 +326,6 @@ class MyEventCfg():
 
 @configclass
 class CurriculumCfg:
-    # spawn_yaw = CurrTerm(
-    #     func=mdp.modify_env_param,
-    #     params={
-    #         "param_name": "pose_range.yaw",
-    #         "start_value": (-0.5, 0.5),      # ~±28° — mostly facing target
-    #         "end_value":   (-3.1415, 3.1415), # full random — any direction
-    #         "num_steps":   5,                 # 5 curriculum steps to full random
-    #     }
-    # )
 
     obstacle_difficulty = CurrTerm(
         func=mdp.obstacle_curriculum_term,
@@ -385,7 +364,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for ict bot."""
 
     # Scene settings
-    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=21.0)
+    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=17.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -403,7 +382,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 5
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 20.0
+        self.episode_length_s = 30.0
         # simulation settings
         self.sim.dt = 1.0 / 100.0
         self.sim.physx.enable_external_forces_every_iteration = True
@@ -423,11 +402,19 @@ class NavigationEnv(ManagerBasedRLEnv):
 
     def __init__(self, cfg: NavigationEnvCfg, render_mode: str | None = None, **kwargs):
         # Must initialize before super().__init__ — managers read these
-        self.target_pos       = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
-        self.prev_tgt_dist    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.episode_start_x  = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.stagnation_timer = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.carrot_pass_count = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.target_pos         = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
+        self.prev_tgt_dist      = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.episode_start_x    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.stagnation_timer   = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.carrot_pass_count  = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.spawn_end          = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
+
+        # Pre-allocate indices so the ObservationManager can check shapes safely on bootup
+        self.waypoint_idx       = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
+        self.spawn_end          = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
+
+        from .carrot import _init_global_geometry_tensors
+        _init_global_geometry_tensors(self, cfg)
 
         super().__init__(cfg, render_mode, **kwargs)
 
@@ -456,12 +443,12 @@ class NavigationEnv(ManagerBasedRLEnv):
                 self.scene["cylinder_small"],
             ],
             cfg=ObstacleSetCfg(
-                max_obstacles=4,          # matches curriculum ceiling
+                max_obstacles=7,          # matches curriculum ceiling
                 shapes=[0, 1, 2, 3, 4, 5],
                 corridor_half_width=1.5,
                 spawn_radius=4.0,
-                min_obstacle_spacing=0.3,
-                max_speed=0.8,
+                min_obstacle_spacing=0.15,
+                max_speed=1.0,
             ),
         )
 

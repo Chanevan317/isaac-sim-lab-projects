@@ -11,52 +11,93 @@ if TYPE_CHECKING:
 
 
 
-# def rel_target_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Scalar distance to waypoint target, ignoring height differences."""
-#     local_pos = rel_target_pos(env, robot_cfg)  # [N, 2]
-#     dist = torch.norm(local_pos, dim=-1, keepdim=True)  # [N, 1]
-#     return dist
-
-
-# def rel_target_pos(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
-#     """Target position in robot's USD local frame."""
+# def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+#     """
+#     Returns [forward_dist_to_line, lateral_offset_from_centreline].
+#     forward_dist: positive = line ahead
+#     lateral_offset: 0 = on centreline, ±1.0 = at line edge
+#     Shape: [N, 2]
+#     """
 #     robot = env.scene[robot_cfg.name]
-#     target = env.target_pos
-    
-#     # Calculate world-space vector
-#     pos_w = target - robot.data.root_pos_w
-    
-#     # CRITICAL: Ignore height differences for 2D corridor navigation
-#     pos_w[:, 2] = 0.0 
-    
-#     # Rotate into robot's local frame
+
+#     forward_local = torch.zeros(env.num_envs, 3, device=env.device)
+#     forward_local[:, 1] = -1.0
+#     forward_world = quat_apply(robot.data.root_quat_w, forward_local)[:, :2]
+
+#     to_carrot = env.target_pos[:, :2] - robot.data.root_pos_w[:, :2]
+#     forward_dist = (to_carrot * forward_world).sum(dim=-1, keepdim=True)  # [N, 1]
+
+#     # Lateral offset from corridor centreline, normalised to [0, 1] at line edge
+#     env_origins = env.scene.env_origins
+#     lateral_offset = (
+#         robot.data.root_pos_w[:, 1] - env_origins[:, 1]
+#     ).unsqueeze(-1) / 1.0   # normalised by CORRIDOR_HALF_WIDTH=1.0
+
+#     return torch.cat([forward_dist, lateral_offset], dim=-1)  # [N, 2]
+
+
+
+# def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
+#     """
+#     Angle from robot forward to the nearest point on the carrot line.
+#     The nearest point on the perpendicular line is always directly
+#     ahead — so this is the angle between robot forward and corridor forward.
+#     This allows the robot to approach the line from any lateral position
+#     without being pulled toward the carrot centre point.
+#     Shape: [N, 2] — [sin, cos] of angle
+#     """
+#     robot = env.scene[robot_cfg.name]
+
+#     # Nearest point on line at carrot_x is (carrot_x, robot_y)
+#     line_target = torch.stack([
+#         env.target_pos[:, 0],   # line X position
+#         robot.data.root_pos_w[:, 1],              # robot current Y — nearest point on line
+#         torch.zeros(env.num_envs, device=env.device)
+#     ], dim=-1)  # [N, 3]
+
+#     # Vector from robot to nearest line point
+#     pos_w = line_target - robot.data.root_pos_w
+#     pos_w[:, 2] = 0.0
+
+#     # Rotate into robot local frame
 #     q_inv = quat_inv(robot.data.root_quat_w)
-#     local_pos = quat_apply(q_inv, pos_w) # [N, 3]
-#     return local_pos[:, :2] # drop z, return [N, 2]
+#     local_pos = quat_apply(q_inv, pos_w)[:, :2]  # [N, 2]
+
+#     # Angle in robot frame — forward is local -Y
+#     angle = torch.atan2(local_pos[:, 0], -local_pos[:, 1])
+#     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
 
 def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     """
     Returns [forward_dist_to_line, lateral_offset_from_centreline].
-    forward_dist: positive = line ahead
-    lateral_offset: 0 = on centreline, ±1.0 = at line edge
-    Shape: [N, 2]
+    Uses the absolute waypoint geometry and lateral triggers.
     """
     robot = env.scene[robot_cfg.name]
 
-    forward_local = torch.zeros(env.num_envs, 3, device=env.device)
-    forward_local[:, 1] = -1.0
-    forward_world = quat_apply(robot.data.root_quat_w, forward_local)[:, :2]
+    # Fetch geometry mappings
+    e_idx = env.spawn_end
+    max_idx = env.static_targets.shape[1] - 1
+    w_idx_safe = torch.clamp(env.waypoint_idx, max=max_idx)
+    
+    corridor_fwd = env.static_tangents[e_idx, w_idx_safe]  # [N, 2]
+    lateral_vec  = env.static_laterals[e_idx, w_idx_safe]  # [N, 2]
+    local_triggers = env.static_triggers[e_idx, w_idx_safe]
 
-    to_carrot = env.target_pos[:, :2] - robot.data.root_pos_w[:, :2]
-    forward_dist = (to_carrot * forward_world).sum(dim=-1, keepdim=True)  # [N, 1]
+    robot_pos = robot.data.root_pos_w[:, :2]
+    target_pos = env.target_pos[:, :2]
 
-    # Lateral offset from corridor centreline, normalised to [0, 1] at line edge
-    env_origins = env.scene.env_origins
-    lateral_offset = (
-        robot.data.root_pos_w[:, 1] - env_origins[:, 1]
-    ).unsqueeze(-1) / 1.0   # normalised by CORRIDOR_HALF_WIDTH=1.0
+    # 1. Forward Distance (projected onto tangent)
+    to_carrot = target_pos - robot_pos
+    forward_dist = (to_carrot * corridor_fwd).sum(dim=-1, keepdim=True)
+
+    # 2. Lateral Offset (projected onto lateral vector from the trigger line)
+    world_triggers = env.scene.env_origins[:, :2] + local_triggers
+    vec_to_robot = robot_pos - world_triggers
+    
+    # Divided by 1.0 (LINE_HALF_WIDTH) to normalize
+    lateral_offset = (vec_to_robot * lateral_vec).sum(dim=-1, keepdim=True) / 1.0
 
     return torch.cat([forward_dist, lateral_offset], dim=-1)  # [N, 2]
 
@@ -64,25 +105,23 @@ def rel_line_dist(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
 
 def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
     """
-    Angle from robot forward to the nearest point on the carrot line.
-    The nearest point on the perpendicular line is always directly
-    ahead — so this is the angle between robot forward and corridor forward.
-    This allows the robot to approach the line from any lateral position
-    without being pulled toward the carrot centre point.
+    Angle from robot forward to the absolute corridor forward (tangent).
     Shape: [N, 2] — [sin, cos] of angle
     """
     robot = env.scene[robot_cfg.name]
 
-    # Nearest point on line at carrot_x is (carrot_x, robot_y)
-    line_target = torch.stack([
-        env.target_pos[:, 0],   # line X position
-        robot.data.root_pos_w[:, 1],              # robot current Y — nearest point on line
-        torch.zeros(env.num_envs, device=env.device)
-    ], dim=-1)  # [N, 3]
+    # Fetch exact corridor forward
+    e_idx = env.spawn_end
+    max_idx = env.static_targets.shape[1] - 1
+    w_idx_safe = torch.clamp(env.waypoint_idx, max=max_idx)
+    
+    corridor_fwd = env.static_tangents[e_idx, w_idx_safe]  # [N, 2]
 
-    # Vector from robot to nearest line point
-    pos_w = line_target - robot.data.root_pos_w
-    pos_w[:, 2] = 0.0
+    # Pad to 3D to apply quaternion rotation
+    pos_w = torch.cat([
+        corridor_fwd, 
+        torch.zeros(env.num_envs, 1, device=env.device)
+    ], dim=-1)
 
     # Rotate into robot local frame
     q_inv = quat_inv(robot.data.root_quat_w)
@@ -90,6 +129,7 @@ def heading_to_line(env: ManagerBasedRLEnv, robot_cfg: SceneEntityCfg):
 
     # Angle in robot frame — forward is local -Y
     angle = torch.atan2(local_pos[:, 0], -local_pos[:, 1])
+    
     return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
