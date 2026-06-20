@@ -45,9 +45,10 @@ class IctBotNavigationEnvCfg_PLAY(IctBotNavigationEnvCfg):
         super().__post_init__()
         # make a smaller scene for play
         self.scene.num_envs = 1
+        self.episode_length_s = 40.0
 
         # disable randomization for play
         self.observations.policy.enable_corruption = False
 
         # Lock obstacles at a specific curriculum level for play
-        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 7
+        self.curriculum.obstacle_difficulty.params["cfg"].play_level = 8

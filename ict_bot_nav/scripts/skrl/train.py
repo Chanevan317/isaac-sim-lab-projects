@@ -308,7 +308,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     ep_rewards    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_lengths    = torch.zeros(env_cfg.scene.num_envs, device=env_cfg.sim.device)
     ep_count      = 0
-    ep_level_counts = torch.zeros(8, device=env_cfg.sim.device) # 1. Expanded from 6 to 8
+    # Expanded to 9 to cover levels 0 through 8
+    ep_level_counts = torch.zeros(9, device=env_cfg.sim.device) 
 
     original_record_transition = runner.agent.record_transition
 
@@ -364,21 +365,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             ep_count          += dones.sum().item()
             ep_rewards[dones]  = 0.0
             ep_lengths[dones]  = 0.0
-            ep_level_counts[obs_level] += dones.sum().item()
+            
+            # Safety clamp to prevent out-of-bounds indexing
+            safe_level = min(obs_level, 8) 
+            ep_level_counts[safe_level] += dones.sum().item()
 
         if timestep % 500 == 0:
             buf = getattr(custom_record_transition, "_buf", {})
 
-            # 2. Added labels for Level 6 and Level 7
             level_labels = {
-                0: "L0 — warm-up               (0 obs, static)",
-                1: "L1 — 1 per seg           (2 total, static)",
-                2: "L2 — 2 per seg           (4 total, static)",
-                3: "L3 — 2 per seg    (4 total, slow 0.30 m/s)",
-                4: "L4 — 2 per seg + corner (5 total, 0.5 m/s)",
-                5: "L5 — 2 per seg + corner (5 total, 0.8 m/s)",
-                6: "L6 — 2 per seg + corner (5 total, 1.0 m/s)",
-                7: "L7 — 3 per seg + corner (7 total, 1.0 m/s)",
+                0: "L0 — 0 obs at 0.0 m/s",
+                1: "L1 — 1 obs at 0.0 m/s",
+                2: "L2 — 2 obs at 0.1 m/s",
+                3: "L3 — 3 obs at 0.3 m/s",
+                4: "L4 — 4 obs at 0.5 m/s",
+                5: "L5 — 5 obs at 0.8 m/s",
+                6: "L6 — 6 obs at 1.0 m/s",
+                7: "L7 — 7 obs at 1.3 m/s",
+                8: "L8 — 8 obs at 1.5 m/s",
             }
 
             curr_level  = getattr(env, "_obs_curr_level", 0)
@@ -400,7 +404,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             print("\n" + "=" * 70)
             print(f"  Timestep            : {timestep:>8} / {timesteps}  "
-                  f"({100 * timestep / timesteps:.1f}%)")
+                f"({100 * timestep / timesteps:.1f}%)")
             print(f"  Episodes finished   : {int(ep_count)}")
 
             if buf.get("rewards"):
@@ -425,28 +429,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print("-" * 70)
                 print("  CURRICULUM")
                 print(f"    Level             : {curr_level}  {level_labels.get(curr_level, '')}")
-                print(f"    Success Rate      : {curr_sr_val:>7.1%}  (rolling 2000 eps)")
+                print(f"    Success Rate      : {curr_sr_val:>7.1%}  (rolling 1000 eps)")
                 print(f"    Consecutive wins  : {curr_consec}")
                 print(f"    Cooldown remaining: {curr_cooldown} eps")
                 print(f"    Last event        : {curr_event}")
                 print("-" * 70)
                 print("  ACTIVE OBSTACLES")
-                print(f"    Per segment       : {live_count}  (H: {live_count}, V: {live_count})")
-                print(f"    Corner active     : {live_corner}")
                 print(f"    Total             : {live_total}")
                 print(f"    Max speed         : {live_speed:.2f} m/s")
                 print("-" * 70)
                 print("  Level distribution  :")
                 
-                # 3. Changed range(6) to range(8) so all levels display in terminal
-                for lvl in range(8):
+                # Update to 9 so it iterates 0 through 8 inclusive
+                for lvl in range(9):
                     frac   = (
                         ep_level_counts[lvl] /
                         ep_level_counts.sum().clamp(min=1)
                     ).item()
                     bar    = "█" * int(frac * 20) if frac > 0.0 else ""
                     active = " ◄" if lvl == curr_level else ""
-                    print(f"    L{lvl} {level_labels.get(lvl, ''):35s}: "
+                    print(f"    {level_labels.get(lvl, f'L{lvl}'):24s}: "
                             f"{frac:>5.1%}  {bar}{active}")
                 print("-" * 70)
 

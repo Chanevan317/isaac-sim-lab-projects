@@ -9,8 +9,11 @@ import torch
 from collections.abc import Sequence
 
 from ict_bot_nav.assets.markers.target_cone import TARGET_CONE_CFG
-from ict_bot_nav.assets.obstacles.object_obstacle import ObstacleSetCfg
-from ict_bot_nav.assets.obstacles.object_obstacle import CUBE_SMALL_CFG, CUBE_MEDIUM_CFG, CUBE_LARGE_CFG, CYLINDER_SMALL_CFG, CYLINDER_MEDIUM_CFG, CYLINDER_LARGE_CFG
+from ict_bot_nav.assets.obstacles.object_obstacle import (
+    ObstacleSetCfg,
+    CUBE_XLARGE_CFG, CUBE_LARGE_CFG, CUBE_MEDIUM_CFG, CUBE_SMALL_CFG,
+    CYLINDER_XLARGE_CFG, CYLINDER_LARGE_CFG, CYLINDER_MEDIUM_CFG, CYLINDER_SMALL_CFG
+)
 from ict_bot_nav.assets.robots.ict_bot import ICT_BOT_CFG
 from .carrot import place_carrot, update_carrot
 from .obstacle_manager import ObstacleManager
@@ -78,9 +81,11 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
     cube_small      = CUBE_SMALL_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeSmall")
     cube_medium     = CUBE_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeMedium")
     cube_large      = CUBE_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeLarge")
+    cube_xlarge     = CUBE_XLARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CubeXLarge")
     cylinder_small  = CYLINDER_SMALL_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderSmall")
     cylinder_medium = CYLINDER_MEDIUM_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderMedium")
     cylinder_large  = CYLINDER_LARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderLarge")
+    cylinder_xlarge = CYLINDER_XLARGE_CFG.replace(prim_path="{ENV_REGEX_NS}/CylinderXLarge")
 
     # robot
     robot: ArticulationCfg = ICT_BOT_CFG.replace(prim_path="/World/envs/env_.*/Robot")
@@ -138,6 +143,18 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
                 merge_prim_meshes=False, 
                 track_mesh_transforms=True
             ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CubeXLarge",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
+            MultiMeshRayCasterCfg.RaycastTargetCfg(
+                prim_expr="{ENV_REGEX_NS}/CylinderXLarge",
+                is_shared=False, 
+                merge_prim_meshes=False, 
+                track_mesh_transforms=True
+            ),
         ],
         pattern_cfg=patterns.LidarPatternCfg(
             channels=1, 
@@ -162,6 +179,8 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             "{ENV_REGEX_NS}/CylinderSmall",
             "{ENV_REGEX_NS}/CylinderMedium",
             "{ENV_REGEX_NS}/CylinderLarge",
+            "{ENV_REGEX_NS}/CubeXLarge",
+            "{ENV_REGEX_NS}/CylinderXLarge"
         ], 
         visualizer_cfg=None,
     )
@@ -269,7 +288,7 @@ class RewardsCfg:
 
     action_rate = RewTerm(
         func=mdp.action_rate_l2,
-        weight=-0.005,
+        weight=-0.001,
     )
 
 
@@ -285,28 +304,28 @@ class MyEventCfg():
         },
     )
 
-    # randomize_wheel_friction = EventTerm(
-    #     func=mdp.randomize_rigid_body_material,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=[".*wheel_joint"]),
-    #         "static_friction_range": (0.5, 1.5),
-    #         "dynamic_friction_range": (0.4, 1.2),
-    #         "restitution_range": (0.0, 0.1),
-    #         "num_buckets": 250,
-    #     }
-    # )
+    randomize_wheel_friction = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*wheel_joint"]),
+            "static_friction_range": (0.5, 1.5),
+            "dynamic_friction_range": (0.4, 1.2),
+            "restitution_range": (0.0, 0.1),
+            "num_buckets": 250,
+        }
+    )
 
-    # # Robot mass randomization — accounts for payload, battery charge variation
-    # randomize_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
-    #         "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
-    #         "operation": "scale",
-    #     }
-    # )
+    # Robot mass randomization — accounts for payload, battery charge variation
+    randomize_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
+            "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
+            "operation": "scale",
+        }
+    )
 
     # Push randomization — random impulses simulate bumps and disturbances
     # push_robot = EventTerm(
@@ -364,7 +383,7 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for ict bot."""
 
     # Scene settings
-    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=17.0)
+    scene: NavigationEnvSceneCfg = NavigationEnvSceneCfg(num_envs=2048, env_spacing=21.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -379,6 +398,11 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
+
+        # 1. Run parent post_init if it exists
+        if hasattr(super(), "__post_init__"):
+            super().__post_init__()
+
         # general settings
         self.decimation = 5
         self.sim.render_interval = self.decimation
@@ -400,18 +424,14 @@ class NavigationEnv(ManagerBasedRLEnv):
     cfg: NavigationEnvCfg
     
 
-    def __init__(self, cfg: NavigationEnvCfg, render_mode: str | None = None, **kwargs):
-        # Must initialize before super().__init__ — managers read these
-        self.target_pos         = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
-        self.prev_tgt_dist      = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.episode_start_x    = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.stagnation_timer   = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.carrot_pass_count  = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
-        self.spawn_end          = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
-
-        # Pre-allocate indices so the ObservationManager can check shapes safely on bootup
-        self.waypoint_idx       = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
-        self.spawn_end          = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
+    def __init__(self, cfg, render_mode=None, **kwargs):
+        self.target_pos        = torch.zeros((cfg.scene.num_envs, 3), device=cfg.sim.device)
+        self.prev_tgt_dist     = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.episode_start_x   = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.stagnation_timer  = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.carrot_pass_count = torch.zeros(cfg.scene.num_envs, device=cfg.sim.device)
+        self.waypoint_idx      = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
+        self.spawn_end         = torch.zeros(cfg.scene.num_envs, dtype=torch.long, device=cfg.sim.device)
 
         from .carrot import _init_global_geometry_tensors
         _init_global_geometry_tensors(self, cfg)
@@ -421,34 +441,34 @@ class NavigationEnv(ManagerBasedRLEnv):
         self.extras.setdefault("episode", {})["goal_reached"] = torch.zeros(
             self.num_envs, device=self.device
         )
-
-        # Post-init state
+        
+        # extras["log"] and other post-init state — episode/goal_reached already exists
         self.extras["log"] = {}
 
-        # Wheel joints
         indices, _ = self.scene["robot"].find_joints(self.cfg.wheel_dof_name)
         self._wheel_indices = torch.tensor(indices, device=self.device, dtype=torch.long)
 
-        # Visualization
         self.target_marker = VisualizationMarkers(self.cfg.target_marker_cfg)
 
         self.obstacle_manager = ObstacleManager(
             env=self,
             assets=[
-                self.scene["cube_large"],
-                self.scene["cube_medium"],
-                self.scene["cube_small"],
-                self.scene["cylinder_large"],
-                self.scene["cylinder_medium"],
-                self.scene["cylinder_small"],
+                self.scene["cube_xlarge"],      # 0
+                self.scene["cube_large"],       # 1
+                self.scene["cube_medium"],      # 2
+                self.scene["cube_small"],       # 3
+                self.scene["cylinder_xlarge"],  # 4
+                self.scene["cylinder_large"],   # 5
+                self.scene["cylinder_medium"],  # 6
+                self.scene["cylinder_small"],   # 7
             ],
             cfg=ObstacleSetCfg(
-                max_obstacles=7,          # matches curriculum ceiling
-                shapes=[0, 1, 2, 3, 4, 5],
+                max_obstacles=8,
+                shapes=[0, 1, 2, 3, 4, 5, 6, 7],
                 corridor_half_width=1.5,
                 spawn_radius=4.0,
                 min_obstacle_spacing=0.15,
-                max_speed=1.0,
+                max_speed=1.5,
             ),
         )
 
@@ -459,27 +479,20 @@ class NavigationEnv(ManagerBasedRLEnv):
         else:
             env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
 
-        super()._reset_idx(env_ids)
-
-        self.stagnation_timer[env_ids] = 0.0
-
-        # Success signal for curriculum — robot passed >= 3 carrots this episode
         self.extras["episode"]["goal_reached"][env_ids] = (
             self.carrot_pass_count[env_ids] >= 3.0
         ).float()
+            
+        super()._reset_idx(env_ids)   # ← curriculum reads goal_reached here — now correct
 
-        # Log pass count for training monitor before reset
-        # (training.py reads this before _reset_idx via snapshot — see below)
+        self.stagnation_timer[env_ids] = 0.0
 
         self.episode_start_x[env_ids] = self.scene["robot"].data.root_pos_w[env_ids, 0]
-
-        # if hasattr(self, "lidar_prev") and self.lidar_prev is not None:
-        #     self.lidar_prev[env_ids] = 0.0
 
         if hasattr(self, "_lidar_history") and self._lidar_history is not None:
             self._lidar_history[env_ids] = 0.0
 
-        place_carrot(self, env_ids)   # resets carrot_pass_count[env_ids] to 0.0
+        place_carrot(self, env_ids)   # resets carrot_pass_count AFTER goal_reached is set
 
         if hasattr(self, "_prev_carrot_pass_count"):
             self._prev_carrot_pass_count[env_ids] = 0.0

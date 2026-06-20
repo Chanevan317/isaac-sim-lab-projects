@@ -1,16 +1,3 @@
-"""
-Static and dynamic rigid-body obstacle asset configurations for ICT-Bot Stage 1.
-
-Size tiers:
-    large  — 0.6 m (cube side / cylinder diameter)
-    medium — 0.4 m
-    small  — 0.2 m
-
-All obstacles are 0.7 m tall so the LiDAR beam at ~0.3 m height hits reliably.
-Geometry is fixed at spawn (Isaac Lab constraint) — size variation is achieved
-by pre-spawning all variants and parking unused ones below the floor.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -42,6 +29,18 @@ def _collision() -> sim_utils.CollisionPropertiesCfg:
 # Cube variants
 # side lengths: large=0.6, medium=0.4, small=0.2 — all 0.7 m tall
 # ---------------------------------------------------------------------------
+
+CUBE_XLARGE_CFG = RigidObjectCfg(
+    prim_path="{ENV_REGEX_NS}/CubeXLarge",
+    spawn=sim_utils.CuboidCfg(
+        size=(0.7, 0.7, 0.7),
+        rigid_props=_rigid_props(),
+        mass_props=_mass(),
+        collision_props=_collision(),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.4, 0.0, 0.0)),
+    ),
+    init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.35)),
+)
 
 CUBE_LARGE_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CubeLarge",
@@ -85,6 +84,19 @@ CUBE_SMALL_CFG = RigidObjectCfg(
 # diameters: large=0.6 (r=0.3), medium=0.4 (r=0.2), small=0.2 (r=0.1)
 # all 0.7 m tall
 # ---------------------------------------------------------------------------
+
+CYLINDER_XLARGE_CFG = RigidObjectCfg(
+    prim_path="{ENV_REGEX_NS}/CylinderXLarge",
+    spawn=sim_utils.CylinderCfg(
+        radius=0.35,
+        height=0.7,
+        rigid_props=_rigid_props(),
+        mass_props=_mass(),
+        collision_props=_collision(),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 0.4)),
+    ),
+    init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.35)),
+)
 
 CYLINDER_LARGE_CFG = RigidObjectCfg(
     prim_path="{ENV_REGEX_NS}/CylinderLarge",
@@ -133,23 +145,25 @@ CYLINDER_SMALL_CFG = RigidObjectCfg(
 # ---------------------------------------------------------------------------
 
 SHAPE_NAMES = {
-    0: "cube_large",
-    1: "cube_medium",
-    2: "cube_small",
-    3: "cylinder_large",
-    4: "cylinder_medium",
-    5: "cylinder_small",
+    0: "cube_xlarge", 
+    1: "cube_large", 
+    2: "cube_medium", 
+    3: "cube_small",
+    4: "cylinder_xlarge",
+    5: "cylinder_large", 
+    6: "cylinder_medium", 
+    7: "cylinder_small",
 }
 
-# Bounding radius for spacing checks — half the diagonal for cubes,
-# actual radius for cylinders
 SHAPE_RADIUS = {
-    0: 0.35,   # cube large  — half diagonal of 0.5×0.5
-    1: 0.21,   # cube medium — half diagonal of 0.3×0.3
-    2: 0.07,   # cube small  — half diagonal of 0.1×0.1
-    3: 0.25,   # cylinder large
-    4: 0.15,   # cylinder medium
-    5: 0.05,   # cylinder small
+    0: 0.49,   # cube_xlarge: half-diagonal of 0.7×0.7
+    1: 0.35,   # cube_large: half-diagonal of 0.5×0.5
+    2: 0.21,   # cube_medium: half-diagonal of 0.3×0.3
+    3: 0.07,   # cube_small: half-diagonal of 0.1×0.1
+    4: 0.35,   # cylinder_xlarge: r=0.35
+    5: 0.25,   # cylinder_large: r=0.25
+    6: 0.15,   # cylinder_medium: r=0.15
+    7: 0.1,    # cylinder_small: r=0.1
 }
 
 
@@ -159,31 +173,12 @@ SHAPE_RADIUS = {
 
 @dataclasses.dataclass
 class ObstacleSetCfg:
-    """Pool of obstacles for Stage 1 curriculum.
 
-    Parameters
-    ----------
-    max_obstacles:
-        Hard upper bound on simultaneous active obstacles per environment.
-    shapes:
-        Which shape_ids to include. Default is all six variants.
-        0=cube_large, 1=cube_medium, 2=cube_small,
-        3=cyl_large,  4=cyl_medium,  5=cyl_small
-    corridor_half_width:
-        Half the usable corridor width in metres (3 m corridor → 1.5).
-    spawn_radius:
-        Obstacles placed within this distance ahead of the robot along X.
-    min_obstacle_spacing:
-        Surface-to-surface margin added on top of combined bounding radii.
-    max_speed:
-        Maximum translational speed m/s. 0 = static only.
-    """
-
-    max_obstacles: int = 7       # matches curriculum ceiling
+    max_obstacles: int = 8       # matches curriculum ceiling
     shapes: list[int] = dataclasses.field(
-        default_factory=lambda: [0, 1, 2, 3, 4, 5]
+        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6, 7]
     )
     corridor_half_width: float = 1.5
     spawn_radius: float = 4.0
     min_obstacle_spacing: float = 0.15
-    max_speed: float = 1.0
+    max_speed: float = 1.5

@@ -141,7 +141,7 @@ def reward_carrot_pass(env: ManagerBasedRLEnv):
 def lidar_proximity_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
-    safe_dist: float = 0.75,
+    safe_dist: float = 0.8,
 ) -> torch.Tensor:
     
     beams_t   = lidar_scan(env, sensor_cfg)  # 180 beams 
