@@ -167,22 +167,19 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
         debug_vis=True,
     )
 
-    contact_sensor = ContactSensorCfg(
+    contact_sensor_body = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/link_base",
         update_period=0.0,
         history_length=3,
-        filter_prim_paths_expr=[
-            "{ENV_REGEX_NS}/corridor",   
-            "{ENV_REGEX_NS}/CubeSmall",
-            "{ENV_REGEX_NS}/CubeMedium",
-            "{ENV_REGEX_NS}/CubeLarge",
-            "{ENV_REGEX_NS}/CylinderSmall",
-            "{ENV_REGEX_NS}/CylinderMedium",
-            "{ENV_REGEX_NS}/CylinderLarge",
-            "{ENV_REGEX_NS}/CubeXLarge",
-            "{ENV_REGEX_NS}/CylinderXLarge"
-        ], 
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/corridor", "{ENV_REGEX_NS}/Cube.*", "{ENV_REGEX_NS}/Cylinder.*"], 
         visualizer_cfg=None,
+    )
+
+    contact_sensor_wheels = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/ict_bot_01/(link_left_wheel|link_right_wheel)",
+        update_period=0.0,
+        history_length=3,
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/corridor", "{ENV_REGEX_NS}/Cube.*", "{ENV_REGEX_NS}/Cylinder.*"],
     )
 
 
@@ -327,20 +324,15 @@ class MyEventCfg():
         }
     )
 
-    # Push randomization — random impulses simulate bumps and disturbances
-    # push_robot = EventTerm(
-    #     func=mdp.push_by_setting_velocity,
-    #     mode="interval",
-    #     interval_range_s=(3.0, 6.0),  # random push every 3–6 seconds
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "velocity_range": {
-    #             "x": (-0.3, 0.3),
-    #             "y": (-0.3, 0.3),
-    #             "yaw": (-0.5, 0.5),
-    #         }
-    #     }
-    # )
+    # Wheel slip randomization — simulates varying floor conditions and wear
+    randomize_wheel_slip = EventTerm(
+        func=mdp.randomize_wheel_slip,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "slip_range": (0.95, 1.05),
+        }
+    )
 
 
 @configclass
@@ -363,10 +355,18 @@ class TerminationsCfg():
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
     # Terminate if the robot touches anything with a force > 1.0 N
-    collision_termination = DoneTerm(
+    collision_termination_body = DoneTerm(
         func=mdp.illegal_contact,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor"), 
+            "sensor_cfg": SceneEntityCfg("contact_sensor_body"), 
+            "threshold": 1.0 # Force in Newtons
+        }
+    )
+
+    collision_termination_wheels = DoneTerm(
+        func=mdp.filtered_illegal_contact,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_sensor_wheels"),
             "threshold": 1.0 # Force in Newtons
         }
     )
@@ -398,10 +398,6 @@ class NavigationEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-
-        # 1. Run parent post_init if it exists
-        if hasattr(super(), "__post_init__"):
-            super().__post_init__()
 
         # general settings
         self.decimation = 5
@@ -448,6 +444,14 @@ class NavigationEnv(ManagerBasedRLEnv):
         indices, _ = self.scene["robot"].find_joints(self.cfg.wheel_dof_name)
         self._wheel_indices = torch.tensor(indices, device=self.device, dtype=torch.long)
 
+        # Action latency buffer — 1-step delay to match real motor controller latency
+        self._action_delay_buf = torch.zeros(
+            self.num_envs, 2, device=self.device
+        )
+        self._action_latency = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )  # 0 or 1 step delay per env, randomised at reset
+
         self.target_marker = VisualizationMarkers(self.cfg.target_marker_cfg)
 
         self.obstacle_manager = ObstacleManager(
@@ -483,7 +487,13 @@ class NavigationEnv(ManagerBasedRLEnv):
             self.carrot_pass_count[env_ids] >= 3.0
         ).float()
             
-        super()._reset_idx(env_ids)   # ← curriculum reads goal_reached here — now correct
+        super()._reset_idx(env_ids)   
+
+        # Randomise latency: 0 or 1 step per env per episode
+        self._action_latency[env_ids] = torch.randint(
+            0, 2, (len(env_ids),), device=self.device
+        )
+        self._action_delay_buf[env_ids] = 0.0
 
         self.stagnation_timer[env_ids] = 0.0
 
@@ -491,6 +501,11 @@ class NavigationEnv(ManagerBasedRLEnv):
 
         if hasattr(self, "_lidar_history") and self._lidar_history is not None:
             self._lidar_history[env_ids] = 0.0
+
+        if hasattr(self, "_lidar_beam_offset") and self._lidar_beam_offset is not None:
+            self._lidar_beam_offset[env_ids] = torch.randint(
+                -3, 4, (len(env_ids),), device=self.device
+            )
 
         place_carrot(self, env_ids)   # resets carrot_pass_count AFTER goal_reached is set
 
@@ -513,8 +528,16 @@ class NavigationEnv(ManagerBasedRLEnv):
 
 
     def step(self, action: torch.Tensor):
-        # process actions
-        self.action_manager.process_action(action.to(self.device))
+        
+        # Apply latency — envs with latency=1 receive last step's action
+        delayed = torch.where(
+            self._action_latency.unsqueeze(-1).bool(),
+            self._action_delay_buf,
+            action.to(self.device),
+        )
+        self._action_delay_buf = action.to(self.device).clone()
+        self.action_manager.process_action(delayed)
+
         self.recorder_manager.record_pre_step()
 
         is_rendering = self.sim.has_gui() or self.sim.has_rtx_sensors()

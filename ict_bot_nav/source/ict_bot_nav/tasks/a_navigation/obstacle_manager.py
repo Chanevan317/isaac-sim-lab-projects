@@ -58,9 +58,25 @@ class ObstacleManager:
         self._obstacle_count = 0
         self._max_speed      = 0.0
 
+        self._max_accel   = 1.5   # m/s² — reasonable human acceleration
+        self._accel_noise = 0.5   # random perturbation to acceleration each step
+
     def set_curriculum_params(self, obstacle_count: int, max_speed: float) -> None:
         self._obstacle_count = max(0, min(obstacle_count, self.max_slots))
         self._max_speed      = max(0.0, max_speed)
+
+        # Acceleration scales with speed — faster obstacles have proportionally
+        # larger acceleration variance to simulate human-like movement
+        # Below 0.3 m/s: near-constant (boxes, carts)
+        # Above 0.5 m/s: human-like acceleration and direction changes
+        if max_speed <= 0.0:
+            self._accel_noise = 0.0
+        elif max_speed < 0.3:
+            self._accel_noise = 0.1   # small perturbation, mostly constant
+        elif max_speed < 0.8:
+            self._accel_noise = 0.5   # moderate — slow humans, carts
+        else:
+            self._accel_noise = 1.5   # full human acceleration variance
 
     def reset(self, env_ids: torch.Tensor) -> None:
         if len(env_ids) == 0:
@@ -144,31 +160,44 @@ class ObstacleManager:
             h_count = total // 2
 
             for slot in range(total):
-                pos = self._pos[:, slot, :]
-                vel = self._vel[:, slot, :]
+                pos = self._pos[:, slot, :]   # [N, 3]
+                vel = self._vel[:, slot, :]   # [N, 2]
 
-                pos[:, :2] += vel[:, :2] * dt
+                # Random acceleration perturbation — each env independently
+                # This simulates direction changes and speed variation
+                accel = (torch.rand_like(vel) * 2.0 - 1.0) * self._accel_noise  # [N, 2]
+                vel_new = vel + accel * dt
+
+                # Clamp to max_speed
+                speed = torch.norm(vel_new, dim=-1, keepdim=True).clamp(min=1e-6)
+                over_limit = speed > self._max_speed
+                vel_new = torch.where(
+                    over_limit,
+                    vel_new / speed * self._max_speed,
+                    vel_new
+                )
+
+                pos[:, :2] += vel_new * dt
+
                 x, y = pos[:, 0], pos[:, 1]
-                vx, vy = vel[:, 0], vel[:, 1]
+                vx, vy = vel_new[:, 0], vel_new[:, 1]
 
                 if slot < h_count:
-                    # Horizontal segment obstacle — bounce within horizontal bounds
                     x_lo, x_hi = -2.0, 5.5
                     y_lo, y_hi = 3.5, 5.5
                 else:
-                    # Vertical segment obstacle — bounce within vertical bounds
                     x_lo, x_hi = 3.5, 5.5
                     y_lo, y_hi = -2.0, 5.5
 
                 flip_x = (x < x_lo) | (x > x_hi)
                 flip_y = (y < y_lo) | (y > y_hi)
-                vel[:, 0] = torch.where(flip_x, -vx, vx)
-                vel[:, 1] = torch.where(flip_y, -vy, vy)
+                vel_new[:, 0] = torch.where(flip_x, -vx, vx)
+                vel_new[:, 1] = torch.where(flip_y, -vy, vy)
                 pos[:, 0] = torch.clamp(x, x_lo, x_hi)
                 pos[:, 1] = torch.clamp(y, y_lo, y_hi)
 
+                self._vel[:, slot, :] = vel_new
                 self._pos[:, slot, :] = pos
-                self._vel[:, slot, :] = vel
 
         all_ids = torch.arange(self.num_envs, device=self.device)
         self._write_to_sim(all_ids)

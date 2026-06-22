@@ -58,3 +58,29 @@ def reset_robot_l_corridor(env, env_ids: torch.Tensor, asset_cfg: SceneEntityCfg
             pose_range=current_range,
             velocity_range=zero_velocity
         )
+
+
+def randomize_wheel_slip(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg,
+    slip_range: tuple[float, float] = (0.95, 1.05),
+) -> None:
+    """
+    Apply independent slip scale to left and right wheel damping.
+    Simulates asymmetric tyre-floor contact — ±5% per wheel independently.
+    """
+    asset = env.scene[asset_cfg.name]
+    indices, _ = asset.find_joints(["left_wheel_joint", "right_wheel_joint"])
+    indices = torch.tensor(indices, device=env.device)
+
+    n = len(env_ids)
+    # Independent scale per wheel per env — [n, 2]
+    scales = torch.empty(n, 2, device=env.device).uniform_(*slip_range)
+
+    current_damping = asset.data.default_joint_damping[env_ids][:, indices]
+    new_damping = current_damping * scales
+
+    asset.write_joint_damping_to_sim(
+        new_damping, joint_ids=indices, env_ids=env_ids
+    )
