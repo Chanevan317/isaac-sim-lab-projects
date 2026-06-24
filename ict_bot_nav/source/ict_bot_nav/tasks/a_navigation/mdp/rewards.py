@@ -145,7 +145,7 @@ def lidar_proximity_penalty(
 ) -> torch.Tensor:
     
     beams_t   = lidar_scan(env, sensor_cfg)  # 180 beams 
-    forward_min = beams_t[:, 90:].min(dim=-1).values * 4.0   # forward 180°
+    forward_min = beams_t[:, 180:].min(dim=-1).values * 4.0   # forward 180°
     global_min  = beams_t.min(dim=-1).values * 4.0            # all directions
 
     forward_ratio = torch.clamp((safe_dist - forward_min) / safe_dist, 0.0, 1.0)

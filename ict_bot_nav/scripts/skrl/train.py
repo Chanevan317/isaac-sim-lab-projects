@@ -399,8 +399,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             obs_mgr = getattr(env, "obstacle_manager", None)
             live_count  = getattr(obs_mgr, "_obstacle_count", 0) if obs_mgr else 0
             live_speed  = getattr(obs_mgr, "_max_speed", 0.0)    if obs_mgr else 0.0
-            live_corner = getattr(obs_mgr, "_corner_active", False) if obs_mgr else False
-            live_total  = live_count * 2 + (1 if live_corner else 0)
 
             print("\n" + "=" * 70)
             print(f"  Timestep            : {timestep:>8} / {timesteps}  "
@@ -435,7 +433,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print(f"    Last event        : {curr_event}")
                 print("-" * 70)
                 print("  ACTIVE OBSTACLES")
-                print(f"    Total             : {live_total}")
+                print(f"    Total             : {live_count}")
                 print(f"    Max speed         : {live_speed:.2f} m/s")
                 print("-" * 70)
                 print("  Level distribution  :")

@@ -36,10 +36,10 @@ class SharedModel(GaussianMixin, DeterministicMixin, Model):
         self.hidden_size = hidden_size
         self.sequence_length = sequence_length
 
-        self.lidar_dim = 180
-        self.proprio_dim = self.num_observations - self.lidar_dim  # 189 - 180 = 9
+        self.lidar_dim = 360
+        self.proprio_dim = self.num_observations - self.lidar_dim  # 369 - 360 = 9
 
-        # --- CNN: spatial feature extractor over 180 LiDAR beams ---
+        # --- CNN: spatial feature extractor over 360 LiDAR beams ---
         self.cnn_container = nn.Sequential(
             nn.LazyConv2d(out_channels=32, kernel_size=[1, 5], stride=[1, 2]),
             nn.ReLU(),

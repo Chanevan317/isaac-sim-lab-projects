@@ -91,7 +91,7 @@ def root_ang_vel_b_z(env, robot_cfg):
 def lidar_scan(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
-    num_beams: int = 180,
+    num_beams: int = 360,
 ):
     if sensor_cfg.name not in env.scene.keys():
         return torch.zeros(env.num_envs, num_beams, device=env.device)

@@ -160,7 +160,7 @@ class NavigationEnvSceneCfg(InteractiveSceneCfg):
             channels=1, 
             vertical_fov_range=(0.0, 0.0), 
             horizontal_fov_range=(0.0, 360.0), 
-            horizontal_res=2.0,  # 180 beams for full 360° coverage
+            horizontal_res=1.0,  # 360 beams for full 360° coverage
         ),
         update_period=0.05,
         max_distance=4.0,
@@ -211,7 +211,7 @@ class ObservationsCfg:
             params={
                 "sensor_cfg": SceneEntityCfg("raycaster"), 
             }
-        )   # [180] — 180 beams
+        )   # [360] — 360 beams
         
         # Targeting (Essential for navigation)
         rel_target = ObsTerm(
