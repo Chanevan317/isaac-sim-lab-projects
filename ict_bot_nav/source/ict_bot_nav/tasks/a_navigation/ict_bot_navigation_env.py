@@ -301,38 +301,38 @@ class MyEventCfg():
         },
     )
 
-    randomize_wheel_friction = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=[".*wheel_joint"]),
-            "static_friction_range": (0.5, 1.5),
-            "dynamic_friction_range": (0.4, 1.2),
-            "restitution_range": (0.0, 0.1),
-            "num_buckets": 250,
-        }
-    )
+    # randomize_wheel_friction = EventTerm(
+    #     func=mdp.randomize_rigid_body_material,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=["link_left_wheel", "link_right_wheel"]),
+    #         "static_friction_range": (0.5, 1.5),
+    #         "dynamic_friction_range": (0.4, 1.2),
+    #         "restitution_range": (0.0, 0.1),
+    #         "num_buckets": 250,
+    #     }
+    # )
 
-    # Robot mass randomization — accounts for payload, battery charge variation
-    randomize_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
-            "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
-            "operation": "scale",
-        }
-    )
+    # # Robot mass randomization — accounts for payload, battery charge variation
+    # randomize_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=["link_base"]),
+    #         "mass_distribution_params": (0.8, 1.2),  # ±20% of nominal mass
+    #         "operation": "scale",
+    #     }
+    # )
 
-    # Wheel slip randomization — simulates varying floor conditions and wear
-    randomize_wheel_slip = EventTerm(
-        func=mdp.randomize_wheel_slip,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "slip_range": (0.95, 1.05),
-        }
-    )
+    # # Wheel slip randomization — simulates varying floor conditions and wear
+    # randomize_wheel_slip = EventTerm(
+    #     func=mdp.randomize_wheel_slip,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "slip_range": (0.95, 1.05),
+    #     }
+    # )
 
 
 @configclass
